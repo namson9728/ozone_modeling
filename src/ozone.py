@@ -86,9 +86,9 @@ class Ozone:
     @airmass.setter
     def airmass(self, airmass):
         if type(airmass) != tuple:
-            raise ValueError("nscale must be a tuple containing the min, max, and num_points airmass values respectively")
+            raise ValueError("airmass must be a tuple containing the min, max, and num_points airmass values respectively")
         elif len(airmass) != 3:
-            raise ValueError(f"Unexpected nscale tuple length. Expected length 3 but got length {len(airmass)}")
+            raise ValueError(f"Unexpected airmass tuple length. Expected length 3 but got length {len(airmass)}")
         else:
             self._airmass= Airmass(airmass[0], airmass[1], airmass[2])
 
