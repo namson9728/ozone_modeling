@@ -1,164 +1,146 @@
 import numpy as np
 
 class Ozone:
-    def __init__(self, nscale, airmass, frequency):
-        self.nscale = nscale
-        self.airmass = airmass
-        self.frequency = frequency
-        self._data = None
+    def __init__(self):
+        self.data = self._load_model_data()
+        self.nscale = None
+        self.airmass = None
 
-    @property
-    def nscale(self):
-        return self._nscale
+    def _load_model_data(self):
+        min_nscale, max_nscale, Nscale_points = -1.0, 1.0, 21
+        min_airmass, max_airmass, airmass_points = 1.001, 4.001, 11
+        freq_points = 240001
 
-    @nscale.setter
-    def nscale(self, nscale):
-        if type(nscale) != tuple:
-            raise ValueError("nscale must be a tuple containing the min, max, and num_points nscale values respectively")
-        elif len(nscale) != 3:
-            raise ValueError(f"Unexpected nscale tuple length. Expected length 3 but got length {len(nscale)}")
-        else:
-            self._nscale = Nscale(nscale[0], nscale[1], nscale[2])
+        Nscale_map = np.linspace(min_nscale, max_nscale, Nscale_points)
+        airmass_map = np.linspace(min_airmass, max_airmass, airmass_points)
 
-    @property
-    def airmass(self):
-        return self._airmass
+        Tb_scalar_field = np.zeros((Nscale_points, airmass_points, freq_points))
+        Nscale_jacobian = np.zeros((Nscale_points, airmass_points, freq_points))
+        za_jacobian = np.zeros((Nscale_points, airmass_points, freq_points))
+        airmass_jacobian = np.zeros((Nscale_points, airmass_points, freq_points))
 
-    @airmass.setter
-    def airmass(self, airmass):
-        if type(airmass) != tuple:
-            raise ValueError("airmass must be a tuple containing the min, max, and num_points airmass values respectively")
-        elif len(airmass) != 3:
-            raise ValueError(f"Unexpected airmass tuple length. Expected length 3 but got length {len(airmass)}")
-        else:
-            self._airmass= Airmass(airmass[0], airmass[1], airmass[2])
+        for idx, Nscale in enumerate(Nscale_map):
+            for jdx, airmass in enumerate(airmass_map):
 
-    @property
-    def frequency(self):
-        return self._frequency
+                filename = f'MaunaKea_Tb_Spectrum_{airmass:.3f}_{Nscale:.2f}'
+                data = np.load(f'/Users/namsonnguyen/repo/AM_Data/MaunaKea_SON50/Nscale21_AirMass11/{filename}.out')
+
+                freq_map = data[:,0]
+                
+                Tb_scalar_field[idx,jdx] = data[:,2]
+
+                Nscale_jacobian[idx,jdx] = data[:,4] * (np.log(10) * (10 ** Nscale))
+                za_jacobian[idx, jdx] = data[:,3]
+                airmass_jacobian[idx,jdx] = za_jacobian[idx, jdx] / (airmass * np.sqrt((airmass**2) - 1))
+
+        return {'airmass':{
+                'map':airmass_map,
+                'jacobian':airmass_jacobian,
+                'points':airmass_points
+            },
+            'Nscale':{
+                'map':Nscale_map,
+                'jacobian':Nscale_jacobian,
+                'points':Nscale_points
+            },
+            'freq':{
+                'map':freq_map,
+                'points':freq_points
+            },
+            'Tb_scalar_field':Tb_scalar_field
+            }
     
-    @frequency.setter
-    def frequency(self, frequency):
-        self._frequency = Frequency(frequency)
+    def _DD_CubicHermiteSpline(self, eval_airmass, eval_nscale, data_dict, reverse=False):
+        '''Returns the interpolation of the data given an airmass and nscale value
 
-    @property
-    def data(self):
-        return self._data
+        `reverse` - set True to reverse the order of operation
+        '''
+        from scipy.interpolate import CubicHermiteSpline
+        from scipy.interpolate import RegularGridInterpolator
+
+        Nscale_map = data_dict['Nscale']['map'][::2]
+        Tb_scalar_field = data_dict['Tb_scalar_field'][::2,::2]
+        Nscale_jacobian = data_dict['Nscale']['jacobian'][::2,::2]
+        airmass_map = data_dict['airmass']['map'][::2]
+        freq_map = data_dict['freq']['map']
+        airmass_jacobian = data_dict['airmass']['jacobian'][::2,::2]
+
+        init_interp_func = CubicHermiteSpline(
+            x=Nscale_map if reverse else airmass_map,
+            y=Tb_scalar_field,
+            dydx=Nscale_jacobian if reverse else airmass_jacobian,
+            axis=0 if reverse else 1,
+        )
+
+        first_eval = init_interp_func(eval_nscale if reverse else eval_airmass)
+
+        # Interpolate for nscale Jacobian at the chosen airmass
+        jacob_interp_func = RegularGridInterpolator(
+            points=(Nscale_map, airmass_map, freq_map),
+            values=airmass_jacobian if reverse else Nscale_jacobian,
+            method="linear",
+        )
+
+        x,y,z = np.meshgrid(
+            eval_nscale if reverse else Nscale_map,
+            airmass_map if reverse else eval_airmass,
+            freq_map,
+            indexing='ij',
+        )
+
+        mod_jacobian = jacob_interp_func(
+            (x.flatten(),y.flatten(),z.flatten())
+        ).reshape(x.shape)
+
+        final_interp_func = CubicHermiteSpline(
+            x=airmass_map if reverse else Nscale_map,
+            y=first_eval,
+            dydx=mod_jacobian,
+            axis=1 if reverse else 0,
+        )
+
+        return final_interp_func(eval_airmass if reverse else eval_nscale)
+
+    def _extract_nominal_pwv(self):
+        err_file = "/Users/namsonnguyen/repo/AM_Data/MaunaKea_SON50/Nscale21_AirMass11/MaunaKea_Tb_Spectrum_1.001_-0.05.err"
+
+        with open(err_file, "r") as file:
+            text_data = file.readlines()
+
+        look_for_pwv = False
+        for idx in range(len(text_data)):
+            if "total" in text_data[idx]: look_for_pwv = True
+            if look_for_pwv:
+                if "um_pwv" in text_data[idx]: pwv = text_data[idx] 
+
+        pwv = pwv.partition('(')
+        pwv = float(pwv[2].partition(' ')[0])
+
+        nscale = err_file.partition(".err")
+        idx, val = 0, ''
+        while nscale[0][-idx] != '_': val = nscale[0][-idx] + val; idx += 1
+        nscale = float(val.partition("/")[0])
+
+        return np.round((pwv*10**-3)/(10**nscale), 2)
     
-    @data.setter
-    def data(self, data):
-        if self._data is None:
-            self._data = {}
-            self._data['RAW'] = data
-            shape = (self._nscale.points, self._airmass.points, self._frequency.points)
-            Tb_scalar_field = np.zeros(shape)
-            nscale_jacobian = np.zeros(shape)
-            za_jacobian = np.zeros(shape)
-            airmass_jacobian = np.zeros(shape)
-
-            for idx, nscale in enumerate(self._nscale.map):
-                for jdx, airmass in enumerate(self._airmass.map):
-                    freq_map = self._data['RAW'][idx,jdx,:,0]
-                    Tb_scalar_field[idx,jdx] = self._data['RAW'][idx,jdx,:,2]
-                    nscale_jacobian[idx,jdx] = self._data['RAW'][idx,jdx,:,4] * (np.log(10) * (10 ** nscale))
-                    za_jacobian[idx, jdx] = self._data['RAW'][idx,jdx,:,3]
-                    airmass_jacobian[idx,jdx] = za_jacobian[idx,jdx] / (airmass * np.sqrt((airmass**2) - 1))
-
-        self._data['NSCALE_JACOBIAN'] = nscale_jacobian
-        self._data['ZENITH_JACOBIAN'] = za_jacobian
-        self._data['AIRMASS_JACOBIAN'] = airmass_jacobian
-        self._data['TB_SCALAR_FIELD'] = Tb_scalar_field
-        self._data['FREQUENCY'] = freq_map
-
-    def __str__(self):
-        return f"Ozone Object in development!"
+    def _zenith_to_airmass(self, zenith):
+        return 1/np.cos(zenith)
     
-class Nscale():
-    def __init__(self, min_val, max_val, points):
-        self.min = min_val
-        self.max = max_val
-        self.points = points
-        self._map = None
+    def _airmass_to_zenith(self, airmass):
+        return 1/np.cos(airmass)
 
-    @property
-    def min(self):
-        return self._min
-    
-    @min.setter
-    def min(self, min_val):
-        self._min = min_val
+    def __call__(self, pwv, zenith):
+        nominal_pwv = self._extract_nominal_pwv()
+        self.nscale = pwv / nominal_pwv
 
-    @property
-    def max(self):
-        return self._max
-    
-    @max.setter
-    def max(self, max_val):
-        self._max = max_val
+        self.airmass = self._zenith_to_airmass(zenith)
 
-    @property
-    def points(self):
-        return self._points
-    
-    @points.setter
-    def points(self, points):
-        self._points = points
-    
-    @property
-    def map(self):
-        if self._map is None:
-            self._map = np.linspace(self._min, self._max, self._points)
-        return self._map
+        print(f"PWV -> nscale: {self.nscale:.2f}")
+        print(f"zenith -> airmass: {self.airmass:.2f}")
 
-    @property
-    def jacobian(self):
-        return self._map
-
-class Airmass(Ozone):
-    def __init__(self, min_val, max_val, points):
-        self.min = min_val
-        self.max = max_val
-        self.points = points
-        self._map = None
-
-    @property
-    def min(self):
-        return self._min
-    
-    @min.setter
-    def min(self, min_val):
-        self._min = min_val
-
-    @property
-    def max(self):
-        return self._max
-    
-    @max.setter
-    def max(self, max_val):
-        self._max = max_val
-
-    @property
-    def points(self):
-        return self._points
-    
-    @points.setter
-    def points(self, points):
-        self._points = points
-
-    @property
-    def map(self):
-        if self._map is None:
-            self._map = np.linspace(self._min, self._max, self._points)
-        return self._map
-
-class Frequency(Ozone):
-    def __init__(self, points):
-        self.points = points
-
-    @property
-    def points(self):
-        return self._points
-    
-    @points.setter
-    def points(self, points):
-        self._points = points
+        return self._DD_CubicHermiteSpline(
+            eval_airmass = [self.airmass],
+            eval_nscale = [self.nscale],
+            data_dict = self.data,
+            reverse=False
+        )
