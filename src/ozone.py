@@ -1,7 +1,8 @@
 import numpy as np
 
 class Ozone:
-    def __init__(self):
+    def __init__(self, am_model_data_path):
+        self.am_model_data_path = am_model_data_path
         self.data = self._load_model_data()
         self.nscale = None
         self.airmass = None
@@ -23,7 +24,7 @@ class Ozone:
             for jdx, airmass in enumerate(airmass_map):
 
                 filename = f'MaunaKea_Tb_Spectrum_{airmass:.3f}_{Nscale:.2f}'
-                data = np.load(f'/Users/namsonnguyen/repo/AM_Data/MaunaKea_SON50/Nscale21_AirMass11/{filename}.out')
+                data = np.load(f'{self.am_model_data_path}{filename}.out')
 
                 freq_map = data[:,0]
                 
