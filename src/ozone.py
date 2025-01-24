@@ -132,7 +132,7 @@ class Ozone:
 
     def __call__(self, pwv, zenith):
         nominal_pwv = self._extract_nominal_pwv()
-        self.nscale = pwv / nominal_pwv
+        self.nscale = np.log10(pwv / nominal_pwv)
 
         self.airmass = self._zenith_to_airmass(zenith)
 
