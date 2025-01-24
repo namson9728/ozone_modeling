@@ -128,7 +128,7 @@ class Ozone:
         return 1/np.cos(zenith)
     
     def _airmass_to_zenith(self, airmass):
-        return 1/np.cos(airmass)
+        return np.arccos(1/airmass)
 
     def __call__(self, pwv, zenith):
         nominal_pwv = self._extract_nominal_pwv()
