@@ -6,6 +6,8 @@ class Ozone:
         self.data = self._load_model_data()
         self.nscale = None
         self.airmass = None
+        self.nominal_pwv = None
+        self.RegularGridInterp_func = None
 
     def _load_model_data(self):
         min_nscale, max_nscale, Nscale_points = -1.0, 1.0, 21
@@ -51,40 +53,31 @@ class Ozone:
             'Tb_scalar_field':Tb_scalar_field
             }
     
-    def _DD_CubicHermiteSpline(self, eval_airmass, eval_nscale, data_dict, reverse=False):
+    def _2DCubicHermiteSpline(self, eval_airmass, eval_nscale, init_interp_func, data_dict):
         '''Returns the interpolation of the data given an airmass and nscale value
 
         `reverse` - set True to reverse the order of operation
         '''
-        from scipy.interpolate import CubicHermiteSpline
         from scipy.interpolate import RegularGridInterpolator
+        from scipy.interpolate import CubicHermiteSpline
 
-        Nscale_map = data_dict['Nscale']['map'][::2]
-        Tb_scalar_field = data_dict['Tb_scalar_field'][::2,::2]
-        Nscale_jacobian = data_dict['Nscale']['jacobian'][::2,::2]
-        airmass_map = data_dict['airmass']['map'][::2]
-        freq_map = data_dict['freq']['map']
-        airmass_jacobian = data_dict['airmass']['jacobian'][::2,::2]
+        airmass_map = self.data['airmass']['map'][::2]
+        Nscale_map = self.data['Nscale']['map'][::2]
+        freq_map = self.data['freq']['map']
+        airmass_jacobian = self.data['airmass']['jacobian'][::2,::2]
 
-        init_interp_func = CubicHermiteSpline(
-            x=Nscale_map if reverse else airmass_map,
-            y=Tb_scalar_field,
-            dydx=Nscale_jacobian if reverse else airmass_jacobian,
-            axis=0 if reverse else 1,
-        )
-
-        first_eval = init_interp_func(eval_nscale if reverse else eval_airmass)
+        first_eval = init_interp_func(eval_nscale)
 
         # Interpolate for nscale Jacobian at the chosen airmass
         jacob_interp_func = RegularGridInterpolator(
             points=(Nscale_map, airmass_map, freq_map),
-            values=airmass_jacobian if reverse else Nscale_jacobian,
+            values=airmass_jacobian,
             method="linear",
         )
 
         x,y,z = np.meshgrid(
-            eval_nscale if reverse else Nscale_map,
-            airmass_map if reverse else eval_airmass,
+            eval_nscale,
+            airmass_map,
             freq_map,
             indexing='ij',
         )
@@ -94,16 +87,25 @@ class Ozone:
         ).reshape(x.shape)
 
         final_interp_func = CubicHermiteSpline(
-            x=airmass_map if reverse else Nscale_map,
+            x=airmass_map,
             y=first_eval,
             dydx=mod_jacobian,
-            axis=1 if reverse else 0,
+            axis=1,
         )
 
-        return final_interp_func(eval_airmass if reverse else eval_nscale)
+        return final_interp_func(eval_airmass)
+    
+    def _2DRegularGridInterpolator(self, eval_airmass, eval_nscale, interp_func):
+
+        x,y,z = np.meshgrid(eval_nscale, eval_airmass, self.data['freq']['map'], indexing='ij')
+
+        spectrum = interp_func((x.flatten(),y.flatten(),z.flatten())).reshape(x.shape)[0,0]
+        
+        return spectrum
 
     def _extract_nominal_pwv(self):
-        err_file = "/Users/namsonnguyen/repo/AM_Data/MaunaKea_SON50/Nscale21_AirMass11/MaunaKea_Tb_Spectrum_1.001_-0.05.err"
+        err_file = f'{self.data['airmass']['map'][0]:.3f}_{self.data['Nscale']['map'][0]:.2f}'
+        err_file = f"{self.am_model_data_path}MaunaKea_Tb_Spectrum_{err_file}.err"
 
         with open(err_file, "r") as file:
             text_data = file.readlines()
@@ -131,17 +133,40 @@ class Ozone:
         return np.arccos(1/airmass)
 
     def __call__(self, pwv, zenith):
-        nominal_pwv = self._extract_nominal_pwv()
-        self.nscale = np.log10(pwv / nominal_pwv)
+        from scipy.interpolate import RegularGridInterpolator
+        from scipy.interpolate import CubicHermiteSpline
+
+        Nscale_map = self.data['Nscale']['map'][::2]
+        Tb_scalar_field = self.data['Tb_scalar_field'][::2,::2]
+        Nscale_jacobian = self.data['Nscale']['jacobian'][::2,::2]
+
+        self.RegularGridInterp_func = RegularGridInterpolator(
+            points=(self.data['Nscale']['map'], self.data['airmass']['map'], self.data['freq']['map']), 
+            values=self.data['Nscale']['jacobian'], method="linear"
+        )
+
+        self.CubicHermiteSplineInterp_func = CubicHermiteSpline(
+            x=Nscale_map,
+            y=Tb_scalar_field,
+            dydx=Nscale_jacobian,
+            axis=0,
+        )
+
+        self.nominal_pwv = self._extract_nominal_pwv()
+        self.nscale = np.log10(pwv / self.nominal_pwv)
 
         self.airmass = self._zenith_to_airmass(zenith)
 
         print(f"PWV -> nscale: {self.nscale:.2f}")
         print(f"zenith -> airmass: {self.airmass:.2f}")
 
-        return self._DD_CubicHermiteSpline(
-            eval_airmass = [self.airmass],
-            eval_nscale = [self.nscale],
-            data_dict = self.data,
-            reverse=False
+        return self._2DCubicHermiteSpline(
+            eval_airmass=[self.airmass],
+            eval_nscale=[self.nscale],
+            data_dict=self.data,
+            init_interp_func=self.CubicHermiteSplineInterp_func
+        ), self._2DRegularGridInterpolator(
+            eval_airmass=self.airmass,
+            eval_nscale=self.nscale,
+            interp_func=self.RegularGridInterp_func
         )
