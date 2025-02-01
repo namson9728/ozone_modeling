@@ -6,8 +6,27 @@ class Ozone:
         self.data = self._load_model_data()
         self.nscale = None
         self.airmass = None
-        self.nominal_pwv = None
+        self.nominal_pwv = self._extract_nominal_pwv()
         self.RegularGridInterp_func = None
+
+        from scipy.interpolate import RegularGridInterpolator
+        from scipy.interpolate import CubicHermiteSpline
+
+        Nscale_map = self.data['Nscale']['map'][::2]
+        Tb_scalar_field = self.data['Tb_scalar_field'][::2,::2]
+        Nscale_jacobian = self.data['Nscale']['jacobian'][::2,::2]
+
+        self.RegularGridInterp_func = RegularGridInterpolator(
+            points=(self.data['Nscale']['map'], self.data['airmass']['map'], self.data['freq']['map']), 
+            values=self.data['Nscale']['jacobian'], method="linear"
+        )
+
+        self.CubicHermiteSplineInterp_func = CubicHermiteSpline(
+            x=Nscale_map,
+            y=Tb_scalar_field,
+            dydx=Nscale_jacobian,
+            axis=0,
+        )
 
     def _load_model_data(self):
         min_nscale, max_nscale, Nscale_points = -1.0, 1.0, 21
@@ -95,16 +114,16 @@ class Ozone:
 
         return final_interp_func(eval_airmass)
     
-    def _2DRegularGridInterpolator(self, eval_airmass, eval_nscale, interp_func):
+    def _2DRegularGridInterpolator(self, eval_airmass, eval_nscale, interp_func, normalization_factor=None):
 
         x,y,z = np.meshgrid(eval_nscale, eval_airmass, self.data['freq']['map'], indexing='ij')
 
         spectrum = interp_func((x.flatten(),y.flatten(),z.flatten())).reshape(x.shape)[0,0]
         
-        eval_pwv = 10**eval_nscale * self.nominal_pwv
-        normalization_factor = 1 / (np.log(10)*eval_pwv)
+        if normalization_factor is not None:
+            return spectrum * normalization_factor
 
-        return spectrum * normalization_factor
+        return spectrum
 
     def _extract_nominal_pwv(self):
         err_file = f'{self.data['airmass']['map'][0]:.3f}_{self.data['Nscale']['map'][0]:.2f}'
@@ -136,8 +155,6 @@ class Ozone:
         return np.arccos(1/airmass)
 
     def __call__(self, pwv, zenith):
-
-        self.nominal_pwv = self._extract_nominal_pwv()
         self.nscale = np.log10(pwv / self.nominal_pwv)
 
         self.airmass = self._zenith_to_airmass(zenith)
@@ -145,24 +162,7 @@ class Ozone:
         print(f"PWV -> nscale: {self.nscale:.2f}")
         print(f"zenith -> airmass: {self.airmass:.2f}")
 
-        from scipy.interpolate import RegularGridInterpolator
-        from scipy.interpolate import CubicHermiteSpline
-
-        Nscale_map = self.data['Nscale']['map'][::2]
-        Tb_scalar_field = self.data['Tb_scalar_field'][::2,::2]
-        Nscale_jacobian = self.data['Nscale']['jacobian'][::2,::2] * (np.log(10) * (10 ** self.nscale))
-
-        self.RegularGridInterp_func = RegularGridInterpolator(
-            points=(self.data['Nscale']['map'], self.data['airmass']['map'], self.data['freq']['map']), 
-            values=self.data['Nscale']['jacobian'], method="linear"
-        )
-
-        self.CubicHermiteSplineInterp_func = CubicHermiteSpline(
-            x=Nscale_map,
-            y=Tb_scalar_field,
-            dydx=Nscale_jacobian,
-            axis=0,
-        )
+        pwv_jacobian_normalization_factor = 1 / (np.log(10)*pwv)
 
         return self._2DCubicHermiteSpline(
             eval_airmass=[self.airmass],
@@ -172,5 +172,6 @@ class Ozone:
         ), self._2DRegularGridInterpolator(
             eval_airmass=self.airmass,
             eval_nscale=self.nscale,
-            interp_func=self.RegularGridInterp_func
+            interp_func=self.RegularGridInterp_func,
+            normalization_factor=pwv_jacobian_normalization_factor
         )
