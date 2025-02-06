@@ -7,7 +7,6 @@ class Ozone:
         self.nscale = None
         self.airmass = None
         self.nominal_pwv = self._extract_nominal_pwv()
-        self.RegularGridInterp_func = None
 
         from scipy.interpolate import RegularGridInterpolator
         from scipy.interpolate import CubicHermiteSpline
@@ -16,9 +15,14 @@ class Ozone:
         Tb_scalar_field = self.data['Tb_scalar_field'][::2,::2]
         Nscale_jacobian = self.data['Nscale']['jacobian'][::2,::2]
 
-        self.RegularGridInterp_func = RegularGridInterpolator(
+        self.NscaleRegularGridInterp_func = RegularGridInterpolator(
             points=(self.data['Nscale']['map'], self.data['airmass']['map'], self.data['freq']['map']), 
             values=self.data['Nscale']['jacobian'], method="linear"
+        )
+
+        self.AirmassRegularGridInterp_func = RegularGridInterpolator(
+            points=(self.data['Nscale']['map'], self.data['airmass']['map'], self.data['freq']['map']), 
+            values=self.data['airmass']['jacobian'], method="linear"
         )
 
         self.CubicHermiteSplineInterp_func = CubicHermiteSpline(
@@ -162,7 +166,8 @@ class Ozone:
         print(f"PWV -> nscale: {self.nscale:.2f}")
         print(f"zenith -> airmass: {self.airmass:.2f}")
 
-        pwv_jacobian_normalization_factor = 1 / (np.log(10)*pwv)
+        nscale_to_pwv_normalization_factor = 1 / (np.log(10)*pwv)
+        airmass_to_zenith_normalization_factor = (1/np.cos(zenith))*np.tan(zenith)
 
         return self._2DCubicHermiteSpline(
             eval_airmass=[self.airmass],
@@ -172,6 +177,11 @@ class Ozone:
         ), self._2DRegularGridInterpolator(
             eval_airmass=self.airmass,
             eval_nscale=self.nscale,
-            interp_func=self.RegularGridInterp_func,
-            normalization_factor=pwv_jacobian_normalization_factor
+            interp_func=self.NscaleRegularGridInterp_func,
+            normalization_factor=nscale_to_pwv_normalization_factor
+        ), self._2DRegularGridInterpolator(
+            eval_airmass=self.airmass,
+            eval_nscale=self.nscale,
+            interp_func=self.AirmassRegularGridInterp_func,
+            normalization_factor=airmass_to_zenith_normalization_factor
         )
