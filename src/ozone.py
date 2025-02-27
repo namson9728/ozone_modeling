@@ -158,30 +158,39 @@ class Ozone:
     def _airmass_to_zenith(self, airmass):
         return np.arccos(1/airmass)
 
-    def __call__(self, pwv, zenith):
+    def __call__(self, pwv, zenith, return_model_spectrum=True, return_pwv_jacobian=False, return_zenith_jacobian=False, toString=False):
         self.nscale = np.log10(pwv / self.nominal_pwv)
-
         self.airmass = self._zenith_to_airmass(zenith)
 
-        print(f"PWV -> nscale: {self.nscale:.2f}")
-        print(f"zenith -> airmass: {self.airmass:.2f}")
+        if toString:
+            print(f"PWV -> nscale: {self.nscale:.2f}")
+            print(f"zenith -> airmass: {self.airmass:.2f}")
 
-        nscale_to_pwv_normalization_factor = 1 / (np.log(10)*pwv)
-        airmass_to_zenith_normalization_factor = (1/np.cos(zenith))*np.tan(zenith)
-
-        return self._2DCubicHermiteSpline(
-            eval_airmass=[self.airmass],
-            eval_nscale=[self.nscale],
-            data_dict=self.data,
-            init_interp_func=self.CubicHermiteSplineInterp_func
-        ), self._2DRegularGridInterpolator(
+        model_spectrum = None
+        if return_model_spectrum:
+            model_spectrum = self._2DCubicHermiteSpline(
+                eval_airmass=[self.airmass],
+                eval_nscale=[self.nscale],
+                data_dict=self.data,
+                init_interp_func=self.CubicHermiteSplineInterp_func
+        )
+        pwv_jacobian = None
+        if return_pwv_jacobian:
+            nscale_to_pwv_normalization_factor = 1 / (np.log(10)*pwv)
+            pwv_jacobian = self._2DRegularGridInterpolator(
             eval_airmass=self.airmass,
             eval_nscale=self.nscale,
             interp_func=self.NscaleRegularGridInterp_func,
             normalization_factor=nscale_to_pwv_normalization_factor
-        ), self._2DRegularGridInterpolator(
+        )
+        zenith_jacobian = None
+        if return_zenith_jacobian:
+            airmass_to_zenith_normalization_factor = (1/np.cos(zenith))*np.tan(zenith)
+            zenith_jacobian = self._2DRegularGridInterpolator(
             eval_airmass=self.airmass,
             eval_nscale=self.nscale,
             interp_func=self.AirmassRegularGridInterp_func,
             normalization_factor=airmass_to_zenith_normalization_factor
         )
+
+        return model_spectrum, pwv_jacobian, zenith_jacobian

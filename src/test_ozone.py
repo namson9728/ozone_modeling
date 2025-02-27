@@ -1,22 +1,64 @@
 import pytest
+import random
 from ozone import Ozone
 import numpy as np
+from line_profiler import profile
 
-# Set-up data
-data_path = '/Users/namsonnguyen/repo/data/AM_Data/MaunaKea_SON50/Nscale21_AirMass11/'
-my_ozone = Ozone(am_model_data_path=data_path)
+AM_DATA_PATH = '/Users/namsonnguyen/repo/data/AM_Data/MaunaKea_SON50/Nscale21_AirMass11/'
 
-nscale_map = my_ozone.data['Nscale']['map']
-airmass_map = my_ozone.data['airmass']['map']
-zenith_map = my_ozone._airmass_to_zenith(airmass_map)
-nominal_pwv = my_ozone._extract_nominal_pwv()
-pwv_map = nominal_pwv * (10**nscale_map)
+@pytest.fixture
+def ozone_object():
+    return Ozone(am_model_data_path=AM_DATA_PATH)
 
-# Kinda sloppy...will clean-up
+@pytest.fixture
+def model_spectrum_params(ozone_object):
+    nscale_map = ozone_object.data['Nscale']['map']
+    nominal_pwv = ozone_object._extract_nominal_pwv()
+    pwv_map = nominal_pwv * (10**nscale_map)
 
-def test_cross_check_with_AM(idx=0):
-    model_spectrum, pwv_jacobian, zenith_jacobian = my_ozone(pwv_map[idx], zenith_map[idx])
-    Tb_data = my_ozone.data['Tb_scalar_field'][idx][idx].reshape(model_spectrum.shape)
+    airmass_map = ozone_object.data['airmass']['map']
+    zenith_map = ozone_object._airmass_to_zenith(airmass_map)
+
+    # Randomize which AM generated datafile to use for testing
+    pwv_idx = random.randint(0, 21)
+    zenith_idx = random.randint(0, 11)
+    model_spectrum, _, _ = ozone_object(pwv_map[pwv_idx], zenith_map[zenith_idx])
+
+    return [model_spectrum, pwv_idx, zenith_idx]
+
+
+@pytest.fixture
+def pwv_Jacobian_params(ozone_object):
+    nscale_map = ozone_object.data['Nscale']['map']
+    nominal_pwv = ozone_object._extract_nominal_pwv()
+    pwv_map = nominal_pwv * (10**nscale_map)
+    
+    start_pwv=pwv_map[0]
+    end_pwv=pwv_map[0]+1
+    zenith_angle=1
+    points=100
+
+    return [ozone_object, start_pwv, end_pwv, zenith_angle, points]
+
+@pytest.fixture
+def zenith_Jacobian_params(ozone_object):
+    airmass_map = ozone_object.data['airmass']['map']
+    zenith_map = ozone_object._airmass_to_zenith(airmass_map)
+
+    start_zenith=zenith_map[0]
+    end_zenith=zenith_map[0]+0.3
+    pwv=5
+    points=50
+
+    return [ozone_object, start_zenith, end_zenith, pwv, points]
+
+@profile
+def test_cross_check_with_AM(model_spectrum_params, ozone_object):
+    model_spectrum = model_spectrum_params[0]
+    pwv_idx = model_spectrum_params[1]
+    zenith_idx = model_spectrum_params[2]
+
+    Tb_data = ozone_object.data['Tb_scalar_field'][pwv_idx][zenith_idx].reshape(model_spectrum.shape)
     difference_spectrum = ((model_spectrum - Tb_data) / Tb_data) * 100
 
     threshold = 1    # 1%
@@ -24,40 +66,54 @@ def test_cross_check_with_AM(idx=0):
 
     assert max_deviation < threshold
 
-def test_with_pwv_Jacobian(start_pwv=pwv_map[0], end_pwv=pwv_map[0]+1, zenith=1, points=50):
-    pwv_map = np.linspace(start_pwv, end_pwv, points)
+@profile
+def test_with_pwv_Jacobian(pwv_Jacobian_params):
+    my_ozone = pwv_Jacobian_params[0]
+    start_pwv = pwv_Jacobian_params[1]
+    end_pwv = pwv_Jacobian_params[2]
+    zenith_angle = pwv_Jacobian_params[3]
+    points = pwv_Jacobian_params[4]
 
-    base_spectrum, base_pwv_jacobian, base_zenith_jacobian = my_ozone(start_pwv, zenith)
-    expected_spectrum, expected_pwv_jacobian, expected_zenith_jacobian = my_ozone(end_pwv, zenith)
+    test_pwv_map = np.linspace(start_pwv, end_pwv, points)
+
+    base_spectrum, _, _ = my_ozone(start_pwv, zenith_angle)
+    expected_spectrum, _, _ = my_ozone(end_pwv, zenith_angle)
 
     test_spectrum = base_spectrum
-    for pwv in pwv_map:
-        spectrum, pwv_jacobian, zenith_jacobian = my_ozone(pwv, zenith)
+    for pwv in test_pwv_map:
+        _, pwv_jacobian, _ = my_ozone(pwv, zenith_angle, return_pwv_jacobian=True, return_model_spectrum=False)
         little_jacobian = pwv_jacobian * ((end_pwv-start_pwv)/points)
         test_spectrum += little_jacobian
 
     difference_spectrum = ((test_spectrum - expected_spectrum) / expected_spectrum) * 100
 
-    threshold = 2    # 2%
+    threshold = 1    # 1%
     max_deviation = np.max(difference_spectrum)
 
     assert max_deviation < threshold
 
-def test_with_zenith_Jacobian(start_zenith=zenith_map[0], end_zenith=zenith_map[0]+0.3, pwv=5, points=50):
+@profile
+def test_with_zenith_Jacobian(zenith_Jacobian_params):
+    my_ozone = zenith_Jacobian_params[0]
+    start_zenith = zenith_Jacobian_params[1]
+    end_zenith = zenith_Jacobian_params[2]
+    pwv = zenith_Jacobian_params[3]
+    points = zenith_Jacobian_params[4]
+
     zenith_map = np.linspace(start_zenith, end_zenith, points)
 
-    base_spectrum, base_pwv_jacobian, base_zenith_jacobian = my_ozone(pwv, start_zenith)
-    expected_spectrum, expected_pwv_jacobian, expected_zenith_jacobian = my_ozone(pwv, end_zenith)
+    base_spectrum, _, _ = my_ozone(pwv, start_zenith)
+    expected_spectrum, _, _ = my_ozone(pwv, end_zenith)
 
     test_spectrum = base_spectrum
     for zenith in zenith_map:
-        spectrum, pwv_jacobian, zenith_jacobian = my_ozone(pwv, zenith)
+        _, _, zenith_jacobian = my_ozone(pwv, zenith, return_zenith_jacobian=True, return_model_spectrum=False)
         little_jacobian = zenith_jacobian * ((end_zenith-start_zenith)/points)
         test_spectrum += little_jacobian
 
     difference_spectrum = ((test_spectrum - expected_spectrum) / expected_spectrum) * 100
 
-    threshold = 2    # 2%
+    threshold = 1    # 1%
     max_deviation = np.max(difference_spectrum)
 
     assert max_deviation < threshold
