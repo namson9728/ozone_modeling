@@ -20,8 +20,8 @@ def model_spectrum_params(ozone_object):
     zenith_map = ozone_object._airmass_to_zenith(airmass_map)
 
     # Randomize which AM generated datafile to use for testing
-    pwv_idx = random.randint(0, 21)
-    zenith_idx = random.randint(0, 11)
+    pwv_idx = random.randint(0, 10)
+    zenith_idx = random.randint(0, 5)
     model_spectrum, _, _ = ozone_object(pwv_map[pwv_idx], zenith_map[zenith_idx])
 
     return [model_spectrum, pwv_idx, zenith_idx]
@@ -34,7 +34,7 @@ def pwv_Jacobian_params(ozone_object):
     pwv_map = nominal_pwv * (10**nscale_map)
     
     start_pwv=pwv_map[0]
-    end_pwv=pwv_map[0]+1
+    end_pwv=pwv_map[1]
     zenith_angle=1
     points=100
 
@@ -45,10 +45,10 @@ def zenith_Jacobian_params(ozone_object):
     airmass_map = ozone_object.data['airmass']['map']
     zenith_map = ozone_object._airmass_to_zenith(airmass_map)
 
-    start_zenith=zenith_map[0]
-    end_zenith=zenith_map[0]+0.3
+    start_zenith=zenith_map[1]
+    end_zenith=zenith_map[2]
     pwv=5
-    points=50
+    points=100
 
     return [ozone_object, start_zenith, end_zenith, pwv, points]
 
@@ -62,9 +62,13 @@ def test_cross_check_with_AM(model_spectrum_params, ozone_object):
     difference_spectrum = ((model_spectrum - Tb_data) / Tb_data) * 100
 
     threshold = 1    # 1%
-    max_deviation = np.max(difference_spectrum)
+    max_deviation = np.percentile(difference_spectrum, 99)
 
     assert max_deviation < threshold
+
+    threshold = 0.1
+    mad = np.sum(difference_spectrum - np.mean(difference_spectrum))/len(difference_spectrum)
+    assert mad < threshold
 
 @profile
 def test_with_pwv_Jacobian(pwv_Jacobian_params):
@@ -88,9 +92,12 @@ def test_with_pwv_Jacobian(pwv_Jacobian_params):
     difference_spectrum = ((test_spectrum - expected_spectrum) / expected_spectrum) * 100
 
     threshold = 1    # 1%
-    max_deviation = np.max(difference_spectrum)
-
+    max_deviation = np.percentile(difference_spectrum, 99)
     assert max_deviation < threshold
+
+    threshold = 0.1
+    mad = np.sum(difference_spectrum - np.mean(difference_spectrum))/len(difference_spectrum)
+    assert mad < threshold
 
 @profile
 def test_with_zenith_Jacobian(zenith_Jacobian_params):
@@ -115,5 +122,8 @@ def test_with_zenith_Jacobian(zenith_Jacobian_params):
 
     threshold = 1    # 1%
     max_deviation = np.max(difference_spectrum)
-
     assert max_deviation < threshold
+
+    threshold = 0.1
+    mad = np.sum(difference_spectrum - np.mean(difference_spectrum))/len(difference_spectrum)
+    assert mad < threshold

@@ -6,7 +6,7 @@ def single_spectrum(spectrum, freq_channels):
             plt.plot(freq_channels, spectrum[idx,jdx])
     plt.xlim(min(freq_channels), max(freq_channels));
 
-def verify_spectrum(test_spectrum, expected_spectrum, difference_spectrum, freq_channels):
+def verify_spectrum(test_spectrum, expected_spectrum, difference_spectrum, freq_channels, title=None):
     import matplotlib.pyplot as plt
     import numpy as np
 
@@ -24,7 +24,10 @@ def verify_spectrum(test_spectrum, expected_spectrum, difference_spectrum, freq_
             ax2.plot(freq_channels, difference_spectrum[idx,jdx])
 
     fig.supxlabel("Frequency [GHz]")
-    fig.suptitle("Verify Model Accuracy")
+    if title==None:
+        fig.suptitle("Verify Model Accuracy")
+    else:
+        fig.suptitle(title)
 
     ax1.set_title(f"Overlay Spectrums")
     ax1.set_ylabel(r'T$_b$ [K]')

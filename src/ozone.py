@@ -1,7 +1,52 @@
 import numpy as np
 
 class Ozone:
-    def __init__(self, am_model_data_path):
+    """Ozone model object that stores the AM generated data.
+
+    Attributes:
+        `am_model_data_path` : str
+            The path where the AM generated data is stored.
+        `data` : dict
+            A dictionary containing the AM generated data.
+        `nscale` : float
+            The nscale value used to generate the AM model.
+        `airmass` : float
+            The airmass value used to generate the AM model.
+        `nominal_pwv` : float
+            The normalization factor to convert from nscale to pwv.
+        `NscaleRegularGridInterp_func` : RegularGridInterpolator
+            The interpolation function for nscale that is used to calculate the PWV Jacobian.
+        `AirmassRegularGridInterp_func` : RegularGridInterpolator
+            The interpolation function for airmass that is used to calculate the zenith angle Jacobian.
+        `CubicHermiteSplineInterp_func` : CubicHermiteSpline
+            The interpolation function that is used to calculate the model Tb spectrum at `nscale` and `airmas`
+
+    Typical Usage Example:
+        ```
+        my_ozone = Ozone(am_model_data_path=data_path)
+        ```
+
+    Format of `data` dictionary:
+    ```
+    {'airmass':{
+        'map':airmass_map,
+        'jacobian':airmass_jacobian,
+        'points':airmass_points
+    },
+    'Nscale':{
+        'map':Nscale_map,
+        'jacobian':Nscale_jacobian,
+        'points':Nscale_points
+    },
+    'freq':{
+        'map':freq_map,
+        'points':freq_points
+    },
+    'Tb_scalar_field':Tb_scalar_field
+    }
+    ```
+    """
+    def __init__(self, am_model_data_path:str):
         self.am_model_data_path = am_model_data_path
         self.data = self._load_model_data()
         self.nscale = None
@@ -11,9 +56,9 @@ class Ozone:
         from scipy.interpolate import RegularGridInterpolator
         from scipy.interpolate import CubicHermiteSpline
 
-        Nscale_map = self.data['Nscale']['map'][::2]
-        Tb_scalar_field = self.data['Tb_scalar_field'][::2,::2]
-        Nscale_jacobian = self.data['Nscale']['jacobian'][::2,::2]
+        Nscale_map = self.data['Nscale']['map']
+        Tb_scalar_field = self.data['Tb_scalar_field']
+        Nscale_jacobian = self.data['Nscale']['jacobian']
 
         self.NscaleRegularGridInterp_func = RegularGridInterpolator(
             points=(self.data['Nscale']['map'], self.data['airmass']['map'], self.data['freq']['map']), 
@@ -33,8 +78,30 @@ class Ozone:
         )
 
     def _load_model_data(self):
-        min_nscale, max_nscale, Nscale_points = -1.0, 1.0, 21
-        min_airmass, max_airmass, airmass_points = 1.001, 4.001, 11
+        """Returns the AM generated data stored in a dictionary.
+
+        The dictionary is in the following format:
+        ```
+        {'airmass':{
+            'map':airmass_map,
+            'jacobian':airmass_jacobian,
+            'points':airmass_points
+        },
+        'Nscale':{
+            'map':Nscale_map,
+            'jacobian':Nscale_jacobian,
+            'points':Nscale_points
+        },
+        'freq':{
+            'map':freq_map,
+            'points':freq_points
+        },
+        'Tb_scalar_field':Tb_scalar_field
+        }
+        ```
+        """
+        min_nscale, max_nscale, Nscale_points = -1.0, 1.0, 11
+        min_airmass, max_airmass, airmass_points = 1.001, 4.001, 6
         freq_points = 240001
 
         Nscale_map = np.linspace(min_nscale, max_nscale, Nscale_points)
@@ -76,18 +143,24 @@ class Ozone:
             'Tb_scalar_field':Tb_scalar_field
             }
     
-    def _2DCubicHermiteSpline(self, eval_airmass, eval_nscale, init_interp_func, data_dict):
-        '''Returns the interpolation of the data given an airmass and nscale value
+    def _2DCubicHermiteSpline(self, eval_airmass, eval_nscale, init_interp_func):
+        '''Returns the interpolation of the data given an airmass and nscale value.
 
-        `reverse` - set True to reverse the order of operation
+        Args:
+            eval_airmass : int
+                The airmass value at which the interpolation will evaluate.
+            eval_nscale : int
+                The nscale value at which the interpolation will evaluate.
+            init_interp_func : CubicHermiteSpline
+                The Cubic Hermite Spline interpolation function initialized upon object creation.
         '''
         from scipy.interpolate import RegularGridInterpolator
         from scipy.interpolate import CubicHermiteSpline
 
-        airmass_map = self.data['airmass']['map'][::2]
-        Nscale_map = self.data['Nscale']['map'][::2]
+        airmass_map = self.data['airmass']['map']
+        Nscale_map = self.data['Nscale']['map']
         freq_map = self.data['freq']['map']
-        airmass_jacobian = self.data['airmass']['jacobian'][::2,::2]
+        airmass_jacobian = self.data['airmass']['jacobian']
 
         first_eval = init_interp_func(eval_nscale)
 
@@ -118,7 +191,11 @@ class Ozone:
 
         return final_interp_func(eval_airmass)
     
-    def _2DRegularGridInterpolator(self, eval_airmass, eval_nscale, interp_func, normalization_factor=None):
+    def _2DRegularGridInterpolator(self, eval_airmass:int, eval_nscale:int, interp_func, normalization_factor=None):
+        """Returns the interpolation spectrum using the provided 2DRegularGrid interpolation function.
+
+        A normalization factor can be provided which is multiplied to the entire spectrum.
+        """
 
         x,y,z = np.meshgrid(eval_nscale, eval_airmass, self.data['freq']['map'], indexing='ij')
 
@@ -130,6 +207,8 @@ class Ozone:
         return spectrum
 
     def _extract_nominal_pwv(self):
+        """Returns the nominal pwv value extracted from one of the AM .err files.
+        """
         err_file = f'{self.data['airmass']['map'][0]:.3f}_{self.data['Nscale']['map'][0]:.2f}'
         err_file = f"{self.am_model_data_path}MaunaKea_Tb_Spectrum_{err_file}.err"
 
@@ -153,12 +232,44 @@ class Ozone:
         return np.round((pwv*10**-3)/(10**nscale), 2)
     
     def _zenith_to_airmass(self, zenith):
+        """Returns the provided zenith angle in radians to the equivalent airmass.
+        """
         return 1/np.cos(zenith)
     
     def _airmass_to_zenith(self, airmass):
+        """Returns the provided airmass into the equivalent zenith angle in radians.
+        """
         return np.arccos(1/airmass)
 
     def __call__(self, pwv, zenith, return_model_spectrum=True, return_pwv_jacobian=False, return_zenith_jacobian=False, toString=False):
+        """Returns the model Tb spectrum, PWV Jacobian, and zenith angle Jacobian given a pwv and zenith angle value.
+
+        The code will convert the pwv and zenith angle and initialize the model's nscale and airmass attributes.
+        In addition to returning the spectrum and Jacobians, the call will also store the results in the model.
+
+        Args:
+            pwv : float
+                The percentile water vapor value at which the AM model will be interpolated.
+            zenith : float
+                The zenith angle value at which the AM model will be interpolated.
+            return_model_spectrum : bool 
+                Set this value to `False` to save computational power if the Tb spectrum is not needed.
+                (Default `True`)
+            return_pwv_jacobian : bool
+                Set this value to `True` to have the call return a calculated PWV Jacobian.
+                (Default `False`)
+            return_zenith_jacobian : bool
+                Set this value to `True` to have the call return a calculated zenith angle Jacobian.
+                (Default `False`)
+            toString : bool
+                Set this value to `True` to have the call print out the converted NScale and airmass value.
+                (Default `False`)
+        
+        Returns:
+            The Tb model spectrum, PWV Jacobian, and zenith angle Jacobian.
+
+        **Please note** that even if `return_pwv_jacobian` and `return_zenith_jacobian` are set to `False`, the code will still return the variables as `None`.
+        """
         self.nscale = np.log10(pwv / self.nominal_pwv)
         self.airmass = self._zenith_to_airmass(zenith)
 
@@ -171,7 +282,6 @@ class Ozone:
             model_spectrum = self._2DCubicHermiteSpline(
                 eval_airmass=[self.airmass],
                 eval_nscale=[self.nscale],
-                data_dict=self.data,
                 init_interp_func=self.CubicHermiteSplineInterp_func
         )
         pwv_jacobian = None
