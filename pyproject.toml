@@ -1,0 +1,8 @@
+[project]
+name = "ozone_modeling"
+version = "0.0.1"
+dependencies = [
+    "numpy",
+    "scipy",
+    "matplotlib",
+]
