@@ -1,5 +1,5 @@
 import numpy as np
-
+from scipy.interpolate import RegularGridInterpolator, CubicHermiteSpline
 class Ozone:
     """Ozone model object that stores the AM generated data.
 
@@ -14,9 +14,9 @@ class Ozone:
             The airmass value used to generate the AM model.
         `nominal_pwv` : float
             The normalization factor to convert from nscale to pwv.
-        `NscaleRegularGridInterp_func` : RegularGridInterpolator
+        `lognscale_jacobian_interp_func` : RegularGridInterpolator
             The interpolation function for nscale that is used to calculate the PWV Jacobian.
-        `AirmassRegularGridInterp_func` : RegularGridInterpolator
+        `logairmass_jacobian_interp_func` : RegularGridInterpolator
             The interpolation function for airmass that is used to calculate the zenith angle Jacobian.
         `CubicHermiteSplineInterp_func` : CubicHermiteSpline
             The interpolation function that is used to calculate the model Tb spectrum at `nscale` and `airmas`
@@ -49,23 +49,20 @@ class Ozone:
     def __init__(self, am_model_data_path:str):
         self.am_model_data_path = am_model_data_path
         self.data = self._load_model_data()
-        self.nscale = None
-        self.airmass = None
+        self.lognscale = None
+        self.logairmass = None
         self.nominal_pwv = self._extract_nominal_pwv()
-
-        from scipy.interpolate import RegularGridInterpolator
-        from scipy.interpolate import CubicHermiteSpline
 
         Nscale_map = self.data['Nscale']['map']
         Tb_scalar_field = self.data['Tb_scalar_field']
         Nscale_jacobian = self.data['Nscale']['jacobian']
 
-        self.NscaleRegularGridInterp_func = RegularGridInterpolator(
+        self.lognscale_jacobian_interp_func = RegularGridInterpolator(
             points=(self.data['Nscale']['map'], self.data['airmass']['map'], self.data['freq']['map']), 
             values=self.data['Nscale']['jacobian'], method="linear"
         )
 
-        self.AirmassRegularGridInterp_func = RegularGridInterpolator(
+        self.logairmass_jacobian_interp_func = RegularGridInterpolator(
             points=(self.data['Nscale']['map'], self.data['airmass']['map'], self.data['freq']['map']), 
             values=self.data['airmass']['jacobian'], method="linear"
         )
@@ -150,39 +147,34 @@ class Ozone:
             init_interp_func : CubicHermiteSpline
                 The Cubic Hermite Spline interpolation function initialized upon object creation.
         '''
-        from scipy.interpolate import RegularGridInterpolator
-        from scipy.interpolate import CubicHermiteSpline
-
-        airmass_map = self.data['airmass']['map']
-        Nscale_map = self.data['Nscale']['map']
+        # We want to do the whole freq spectrum (for now)
         freq_map = self.data['freq']['map']
-        airmass_jacobian = self.data['airmass']['jacobian']
 
-        first_eval = init_interp_func(eval_nscale)
+        # But we _only_ need the nearest two airmasses for the interpolation
+        airmass_map = self.data['airmass']['map']
+        first_idx = np.nonzero(airmass_map <= eval_airmass)[0][-1]
+        last_idx = np.nonzero(airmass_map >= eval_airmass)[0][0] + 2
+        if last_idx > len(airmass_map):
+            airmass_slice = slice(first_idx - 1, last_idx - 1)
+        else:
+            airmass_slice = slice(first_idx, last_idx)
+
+        first_eval = init_interp_func(eval_nscale)[:, airmass_slice, :]
 
         # Interpolate for nscale Jacobian at the chosen airmass
-        jacob_interp_func = RegularGridInterpolator(
-            points=(Nscale_map, airmass_map, freq_map),
-            values=airmass_jacobian,
-            method="linear",
-        )
-
         x,y,z = np.meshgrid(
             eval_nscale,
-            airmass_map,
+            airmass_map[airmass_slice],
             freq_map,
             indexing='ij',
         )
 
-        mod_jacobian = jacob_interp_func(
+        mod_jacobian = self.logairmass_jacobian_interp_func(
             (x.flatten(),y.flatten(),z.flatten())
         ).reshape(x.shape)
 
         final_interp_func = CubicHermiteSpline(
-            x=airmass_map,
-            y=first_eval,
-            dydx=mod_jacobian,
-            axis=1,
+            x=airmass_map[airmass_slice], y=first_eval, dydx=mod_jacobian, axis=1
         )
 
         return final_interp_func(eval_airmass)
@@ -291,7 +283,7 @@ class Ozone:
             pwv_jacobian = self._2DRegularGridInterpolator(
             eval_airmass=self.logairmass,
             eval_nscale=self.lognscale,
-            interp_func=self.NscaleRegularGridInterp_func,
+            interp_func=self.lognscale_jacobian_interp_func,
             normalization_factor=nscale_to_pwv_normalization_factor
         )
         zenith_jacobian = None
@@ -300,7 +292,7 @@ class Ozone:
             zenith_jacobian = self._2DRegularGridInterpolator(
             eval_airmass=self.logairmass,
             eval_nscale=self.lognscale,
-            interp_func=self.AirmassRegularGridInterp_func,
+            interp_func=self.logairmass_jacobian_interp_func,
             normalization_factor=airmass_to_zenith_normalization_factor
         )
 

@@ -20,8 +20,8 @@ def model_spectrum_params(ozone_object):
     zenith_map = ozone_object._airmass_to_zenith(airmass_map)
 
     # Randomize which AM generated datafile to use for testing
-    pwv_idx = random.randint(0, 10)
-    zenith_idx = random.randint(0, 5)
+    pwv_idx = random.randint(0, len(pwv_map) - 1)
+    zenith_idx = random.randint(0, len(zenith_map) - 1)
     model_spectrum, _, _ = ozone_object(pwv_map[pwv_idx], zenith_map[zenith_idx])
 
     return [model_spectrum, pwv_idx, zenith_idx]
@@ -31,7 +31,7 @@ def model_spectrum_params(ozone_object):
 def pwv_Jacobian_params(ozone_object):
     nscale_map = ozone_object.data['Nscale']['map']
     nominal_pwv = ozone_object._extract_nominal_pwv()
-    pwv_map = nominal_pwv * (10**nscale_map)
+    pwv_map = nominal_pwv * np.exp(nscale_map)
     
     start_pwv=pwv_map[0]
     end_pwv=pwv_map[1]
@@ -43,7 +43,7 @@ def pwv_Jacobian_params(ozone_object):
 @pytest.fixture
 def zenith_Jacobian_params(ozone_object):
     airmass_map = ozone_object.data['airmass']['map']
-    zenith_map = ozone_object._airmass_to_zenith(airmass_map)
+    zenith_map = ozone_object._airmass_to_zenith(np.exp(airmass_map))
 
     start_zenith=zenith_map[1]
     end_zenith=zenith_map[2]
