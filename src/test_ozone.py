@@ -4,7 +4,7 @@ from ozone import Ozone
 import numpy as np
 from line_profiler import profile
 
-AM_DATA_PATH = '/Users/namsonnguyen/repo/data/AM_Data/MaunaKea_SON50/Nscale21_AirMass11/'
+AM_DATA_PATH = '/Users/gkeating/newdata2/'
 
 @pytest.fixture
 def ozone_object():
@@ -14,9 +14,9 @@ def ozone_object():
 def model_spectrum_params(ozone_object):
     nscale_map = ozone_object.data['Nscale']['map']
     nominal_pwv = ozone_object._extract_nominal_pwv()
-    pwv_map = nominal_pwv * (10**nscale_map)
+    pwv_map = nominal_pwv * np.exp(nscale_map)
 
-    airmass_map = ozone_object.data['airmass']['map']
+    airmass_map = np.exp(ozone_object.data['airmass']['map'])
     zenith_map = ozone_object._airmass_to_zenith(airmass_map)
 
     # Randomize which AM generated datafile to use for testing

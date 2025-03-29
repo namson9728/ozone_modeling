@@ -100,41 +100,37 @@ class Ozone:
         }
         ```
         """
-        min_nscale, max_nscale, Nscale_points = -1.0, 1.0, 11
-        min_airmass, max_airmass, airmass_points = 1.001, 4.001, 6
+        min_logNscale, max_logNnscale, logNscale_points = -1.0, 1.0, 9
+        min_logairmass, max_logairmass, logairmass_points = 0.001, 1.281, 9
         freq_points = 240001
 
-        Nscale_map = np.linspace(min_nscale, max_nscale, Nscale_points)
-        airmass_map = np.linspace(min_airmass, max_airmass, airmass_points)
+        logNscale_map = np.linspace(min_logNscale, max_logNnscale, logNscale_points)
+        logairmass_map = np.linspace(min_logairmass, max_logairmass, logairmass_points)
 
-        Tb_scalar_field = np.zeros((Nscale_points, airmass_points, freq_points))
-        Nscale_jacobian = np.zeros((Nscale_points, airmass_points, freq_points))
-        za_jacobian = np.zeros((Nscale_points, airmass_points, freq_points))
-        airmass_jacobian = np.zeros((Nscale_points, airmass_points, freq_points))
+        Tb_scalar_field = np.zeros((logNscale_points, logairmass_points, freq_points))
+        Nscale_jacobian = np.zeros((logNscale_points, logairmass_points, freq_points))
+        airmass_jacobian = np.zeros((logNscale_points, logairmass_points, freq_points))
 
-        for idx, Nscale in enumerate(Nscale_map):
-            for jdx, airmass in enumerate(airmass_map):
+        for idx, logNscale in enumerate(logNscale_map):
+            for jdx, logairmass in enumerate(logairmass_map):
 
-                filename = f'MaunaKea_Tb_Spectrum_{airmass:.3f}_{Nscale:.2f}'
+                filename = f'MaunaKea_Tb_Spectrum_{logairmass:.3f}_{logNscale:+.3f}'
                 data = np.load(f'{self.am_model_data_path}{filename}.out')
 
                 freq_map = data[:,0]
-                
                 Tb_scalar_field[idx,jdx] = data[:,2]
-
-                Nscale_jacobian[idx,jdx] = data[:,4] * (np.log(10) * (10 ** Nscale))
-                za_jacobian[idx, jdx] = data[:,3]
-                airmass_jacobian[idx,jdx] = za_jacobian[idx, jdx] / (airmass * np.sqrt((airmass**2) - 1))
+                airmass_jacobian[idx,jdx] = data[:,3] / np.sqrt(np.exp(2*logairmass)-1)
+                Nscale_jacobian[idx,jdx] = data[:,4] * np.exp(logNscale)
 
         return {'airmass':{
-                'map':airmass_map,
+                'map':logairmass_map,
                 'jacobian':airmass_jacobian,
-                'points':airmass_points
+                'points':logairmass_points
             },
             'Nscale':{
-                'map':Nscale_map,
+                'map':logNscale_map,
                 'jacobian':Nscale_jacobian,
-                'points':Nscale_points
+                'points':logNscale_points
             },
             'freq':{
                 'map':freq_map,
@@ -209,7 +205,9 @@ class Ozone:
     def _extract_nominal_pwv(self):
         """Returns the nominal pwv value extracted from one of the AM .err files.
         """
-        err_file = f'{self.data['airmass']['map'][0]:.3f}_{self.data['Nscale']['map'][0]:.2f}'
+        lognscale = self.data['Nscale']['map'][0]
+        logairmass = self.data['airmass']['map'][0]
+        err_file = f'{logairmass:.3f}_{lognscale:+.3f}'
         err_file = f"{self.am_model_data_path}MaunaKea_Tb_Spectrum_{err_file}.err"
 
         with open(err_file, "r") as file:
@@ -224,12 +222,7 @@ class Ozone:
         pwv = pwv.partition('(')
         pwv = float(pwv[2].partition(' ')[0])
 
-        nscale = err_file.partition(".err")
-        idx, val = 0, ''
-        while nscale[0][-idx] != '_': val = nscale[0][-idx] + val; idx += 1
-        nscale = float(val.partition("/")[0])
-
-        return np.round((pwv*10**-3)/(10**nscale), 2)
+        return (pwv*10**-3)/np.exp(lognscale)
     
     def _zenith_to_airmass(self, zenith):
         """Returns the provided zenith angle in radians to the equivalent airmass.
@@ -241,7 +234,15 @@ class Ozone:
         """
         return np.arccos(1/airmass)
 
-    def __call__(self, pwv, zenith, return_model_spectrum=True, return_pwv_jacobian=False, return_zenith_jacobian=False, toString=False):
+    def __call__(
+            self,
+            pwv,
+            zenith,
+            return_model_spectrum=True,
+            return_pwv_jacobian=False,
+            return_zenith_jacobian=False,
+            toString=False,
+        ):
         """Returns the model Tb spectrum, PWV Jacobian, and zenith angle Jacobian given a pwv and zenith angle value.
 
         The code will convert the pwv and zenith angle and initialize the model's nscale and airmass attributes.
@@ -270,35 +271,35 @@ class Ozone:
 
         **Please note** that even if `return_pwv_jacobian` and `return_zenith_jacobian` are set to `False`, the code will still return the variables as `None`.
         """
-        self.nscale = np.log10(pwv / self.nominal_pwv)
-        self.airmass = self._zenith_to_airmass(zenith)
+        self.lognscale = np.log(pwv / self.nominal_pwv)
+        self.logairmass = np.log(self._zenith_to_airmass(zenith))
 
         if toString:
-            print(f"PWV -> nscale: {self.nscale:.2f}")
-            print(f"zenith -> airmass: {self.airmass:.2f}")
+            print(f"PWV -> nscale: {np.exp(self.lognscale):.2f}")
+            print(f"zenith -> airmass: {np.exp(self.logairmass):.2f}")
 
         model_spectrum = None
         if return_model_spectrum:
             model_spectrum = self._2DCubicHermiteSpline(
-                eval_airmass=[self.airmass],
-                eval_nscale=[self.nscale],
+                eval_airmass=[self.logairmass],
+                eval_nscale=[self.lognscale],
                 init_interp_func=self.CubicHermiteSplineInterp_func
         )
         pwv_jacobian = None
         if return_pwv_jacobian:
-            nscale_to_pwv_normalization_factor = 1 / (np.log(10)*pwv)
+            nscale_to_pwv_normalization_factor = 1 / pwv
             pwv_jacobian = self._2DRegularGridInterpolator(
-            eval_airmass=self.airmass,
-            eval_nscale=self.nscale,
+            eval_airmass=self.logairmass,
+            eval_nscale=self.lognscale,
             interp_func=self.NscaleRegularGridInterp_func,
             normalization_factor=nscale_to_pwv_normalization_factor
         )
         zenith_jacobian = None
         if return_zenith_jacobian:
-            airmass_to_zenith_normalization_factor = (1/np.cos(zenith))*np.tan(zenith)
+            airmass_to_zenith_normalization_factor = np.tan(zenith)
             zenith_jacobian = self._2DRegularGridInterpolator(
-            eval_airmass=self.airmass,
-            eval_nscale=self.nscale,
+            eval_airmass=self.logairmass,
+            eval_nscale=self.lognscale,
             interp_func=self.AirmassRegularGridInterp_func,
             normalization_factor=airmass_to_zenith_normalization_factor
         )
