@@ -46,9 +46,9 @@ class Ozone:
     }
     ```
     """
-    def __init__(self, am_model_data_path:str):
+    def __init__(self, am_model_data_path:str, freq_range=None):
         self.am_model_data_path = am_model_data_path
-        self.data = self._load_model_data()
+        self.data = self._load_model_data(freq_range=freq_range)
         self.lognscale = None
         self.logairmass = None
         self.nominal_pwv = self._extract_nominal_pwv()
@@ -74,7 +74,16 @@ class Ozone:
             axis=0,
         )
 
-    def _load_model_data(self):
+        self.cubic_interp_dict = {}
+        for idx in range(len(self.data['airmass']['map'])):
+            self.cubic_interp_dict[idx] = CubicHermiteSpline(
+                x=Nscale_map,
+                y=Tb_scalar_field[:, idx:idx+1, :],
+                dydx=Nscale_jacobian[:, idx:idx+1, :],
+                axis=0,
+            )
+
+    def _load_model_data(self, freq_range=None):
         """Returns the AM generated data stored in a dictionary.
 
         The dictionary is in the following format:
@@ -99,14 +108,11 @@ class Ozone:
         """
         min_logNscale, max_logNnscale, logNscale_points = -1.0, 1.0, 9
         min_logairmass, max_logairmass, logairmass_points = 0.001, 1.281, 9
-        freq_points = 240001
 
         logNscale_map = np.linspace(min_logNscale, max_logNnscale, logNscale_points)
         logairmass_map = np.linspace(min_logairmass, max_logairmass, logairmass_points)
-
-        Tb_scalar_field = np.zeros((logNscale_points, logairmass_points, freq_points))
-        Nscale_jacobian = np.zeros((logNscale_points, logairmass_points, freq_points))
-        airmass_jacobian = np.zeros((logNscale_points, logairmass_points, freq_points))
+        freq_mask = ...
+        init_arr = True
 
         for idx, logNscale in enumerate(logNscale_map):
             for jdx, logairmass in enumerate(logairmass_map):
@@ -114,10 +120,21 @@ class Ozone:
                 filename = f'MaunaKea_Tb_Spectrum_{logairmass:.3f}_{logNscale:+.3f}'
                 data = np.load(f'{self.am_model_data_path}{filename}.out')
 
-                freq_map = data[:,0]
-                Tb_scalar_field[idx,jdx] = data[:,2]
-                airmass_jacobian[idx,jdx] = data[:,3] / np.sqrt(np.exp(2*logairmass)-1)
-                Nscale_jacobian[idx,jdx] = data[:,4] * np.exp(logNscale)
+                if init_arr:
+                    freq_map = data[:, 0]
+                    if freq_range is not None:
+                        freq_mask = (freq_map >= freq_range[0]) & (freq_map <= freq_range[1])
+                    freq_map = freq_map[freq_mask]
+
+                    freq_points = len(freq_map)
+                    Tb_scalar_field = np.zeros((logNscale_points, logairmass_points, freq_points))
+                    Nscale_jacobian = np.zeros((logNscale_points, logairmass_points, freq_points))
+                    airmass_jacobian = np.zeros((logNscale_points, logairmass_points, freq_points))
+                    init_arr = False
+
+                Tb_scalar_field[idx,jdx] = data[freq_mask, 2]
+                airmass_jacobian[idx,jdx] = data[freq_mask,3] / np.sqrt(np.exp(2*logairmass)-1)
+                Nscale_jacobian[idx,jdx] = data[freq_mask, 4] * np.exp(logNscale)
 
         return {'airmass':{
                 'map':logairmass_map,
@@ -194,6 +211,94 @@ class Ozone:
 
         return spectrum
 
+    def _bilinear_jacobian_interp(
+        self, eval_nscale: float | slice, eval_airmass: float | slice, field, norm_factor=None
+    ):
+        """Returns the interpolation spectrum using the provided 2DRegularGrid interpolation function.
+
+        A normalization factor can be provided which is multiplied to the entire spectrum.
+        """
+        data = self.data[field]['jacobian']
+        index_dict = {"Nscale": [eval_nscale],  "airmass": [eval_airmass]}
+        weights_dict = {"Nscale": [1], "airmass": [1]}
+
+        for item, eval_val in zip(["Nscale", "airmass"], [eval_nscale, eval_airmass]):
+            if isinstance(eval_val, slice):
+                continue
+            axis_map = self.data[item]['map']
+            temp_idx = np.searchsorted(axis_map, eval_val, 'left')
+            if eval_val == axis_map[temp_idx]:
+                index_dict[item] = [temp_idx] # type: ignore
+            else:
+                assert (temp_idx >= 1) and (temp_idx < len(axis_map))
+                eval_val = index_dict[item][0]
+                index_dict[item] = [temp_idx - 1, temp_idx] # type: ignore
+                l_val = axis_map[temp_idx - 1]
+                r_val = axis_map[temp_idx]
+                del_val = r_val - l_val
+                weights_dict[item] = [
+                    (r_val - eval_val) / del_val, (eval_val - l_val) / del_val
+                ]
+        nscale_idx = index_dict["Nscale"]
+        airmass_idx = index_dict["airmass"]
+        set_result = True
+        if (len(airmass_idx) == 1) and (len(nscale_idx) == 1):
+            result = data[nscale_idx[0], airmass_idx[0]]
+        else:
+            for n_idx, n_weight in zip(nscale_idx, weights_dict["Nscale"]):
+                for a_idx, a_weight in zip(airmass_idx, weights_dict["airmass"]):
+                    if set_result:
+                        result = data[n_idx, a_idx] * (a_weight * n_weight)
+                        set_result = False
+                    else:
+                        result += data[n_idx, a_idx] * (a_weight * n_weight)
+        if not isinstance(nscale_idx[0], slice):
+            result = result[None]
+        if not isinstance(airmass_idx[0], slice):
+            result = result[:, None]
+
+        return result if norm_factor is None else (result * norm_factor)
+
+    def _interp_spectrum(self, eval_airmass, eval_nscale):
+        '''Returns the interpolation of the data given an airmass and nscale value.
+
+        Args:
+            eval_airmass : int
+                The airmass value at which the interpolation will evaluate.
+            eval_nscale : int
+                The nscale value at which the interpolation will evaluate.
+        '''
+        # But we _only_ need the nearest two airmasses for the interpolation
+        airmass_map = self.data['airmass']['map']
+        assert (eval_airmass >= airmass_map[0]) and (eval_airmass <= airmass_map[-1]), (
+            "eval_airmass out of bounds!"
+        )
+        right_airmass_idx = np.searchsorted(airmass_map, eval_airmass[0], 'right')
+        if right_airmass_idx == len(airmass_map):
+            right_airmass_idx -= 1
+        left_airmass_idx = right_airmass_idx - 1
+        airmass_slice = slice(left_airmass_idx, right_airmass_idx + 1)
+
+        first_eval = np.concatenate(
+            (
+                self.cubic_interp_dict[left_airmass_idx](eval_nscale),
+                self.cubic_interp_dict[right_airmass_idx](eval_nscale),
+            ),
+            axis=1,
+        )
+
+        # Interpolate for nscale Jacobian at the chosen nscale
+        mod_jacobian = self._bilinear_jacobian_interp(
+            eval_nscale=eval_nscale[0],
+            eval_airmass=airmass_slice,
+            field="airmass"
+        )
+        final_interp_func = CubicHermiteSpline(
+            x=airmass_map[airmass_slice], y=first_eval, dydx=mod_jacobian, axis=1
+        )
+
+        return final_interp_func(eval_airmass)
+    
     def _extract_nominal_pwv(self):
         """Returns the nominal pwv value extracted from one of the AM .err files.
         """
@@ -272,28 +377,27 @@ class Ozone:
 
         model_spectrum = None
         if return_model_spectrum:
-            model_spectrum = self._2DCubicHermiteSpline(
+            model_spectrum = self._interp_spectrum(
                 eval_airmass=[self.logairmass],
                 eval_nscale=[self.lognscale],
-                init_interp_func=self.CubicHermiteSplineInterp_func
         )
         pwv_jacobian = None
         if return_pwv_jacobian:
             nscale_to_pwv_normalization_factor = 1 / pwv
-            pwv_jacobian = self._2DRegularGridInterpolator(
-            eval_airmass=self.logairmass,
-            eval_nscale=self.lognscale,
-            interp_func=self.lognscale_jacobian_interp_func,
-            normalization_factor=nscale_to_pwv_normalization_factor
-        )
+            pwv_jacobian = self._bilinear_jacobian_interp(
+                eval_nscale=self.lognscale,
+                eval_airmass=self.logairmass,
+                field="Nscale",
+                norm_factor=nscale_to_pwv_normalization_factor
+            )
         zenith_jacobian = None
         if return_zenith_jacobian:
             airmass_to_zenith_normalization_factor = np.tan(zenith)
-            zenith_jacobian = self._2DRegularGridInterpolator(
-            eval_airmass=self.logairmass,
-            eval_nscale=self.lognscale,
-            interp_func=self.logairmass_jacobian_interp_func,
-            normalization_factor=airmass_to_zenith_normalization_factor
-        )
+            zenith_jacobian = self._bilinear_jacobian_interp(
+                eval_nscale=self.lognscale,
+                eval_airmass=self.logairmass,
+                field="airmass",
+                norm_factor=airmass_to_zenith_normalization_factor
+            )
 
         return model_spectrum, pwv_jacobian, zenith_jacobian
