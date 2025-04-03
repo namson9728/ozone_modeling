@@ -89,15 +89,13 @@ def test_with_pwv_Jacobian(pwv_Jacobian_params):
         little_jacobian = pwv_jacobian * ((end_pwv-start_pwv)/points)
         test_spectrum += little_jacobian
 
-    difference_spectrum = ((test_spectrum - expected_spectrum) / expected_spectrum) * 100
+    difference_spectrum = abs((test_spectrum - expected_spectrum) / expected_spectrum) * 100
 
-    threshold = 1    # 1%
-    max_deviation = np.percentile(difference_spectrum, 99)
-    assert max_deviation < threshold
-
-    threshold = 0.1
-    mad = np.sum(difference_spectrum - np.mean(difference_spectrum))/len(difference_spectrum)
-    assert mad < threshold
+    max_threshold = 1    # 1%
+    mad_threshold = 0.1 # 0.1%
+    mad_deviation, max_deviation = np.percentile(difference_spectrum, [50, 99])
+    assert max_deviation < max_threshold
+    assert mad_deviation < mad_threshold
 
 @profile
 def test_with_zenith_Jacobian(zenith_Jacobian_params):
@@ -118,12 +116,10 @@ def test_with_zenith_Jacobian(zenith_Jacobian_params):
         little_jacobian = zenith_jacobian * ((end_zenith-start_zenith)/points)
         test_spectrum += little_jacobian
 
-    difference_spectrum = ((test_spectrum - expected_spectrum) / expected_spectrum) * 100
+    difference_spectrum = abs((test_spectrum - expected_spectrum) / expected_spectrum) * 100
 
-    threshold = 1    # 1%
-    max_deviation = np.max(difference_spectrum)
-    assert max_deviation < threshold
-
-    threshold = 0.1
-    mad = np.sum(difference_spectrum - np.mean(difference_spectrum))/len(difference_spectrum)
-    assert mad < threshold
+    max_threshold = 1    # 1%
+    mad_threshold = 0.1 # 0.1%
+    mad_deviation, max_deviation = np.percentile(difference_spectrum, [50, 99])
+    assert max_deviation < max_threshold
+    assert mad_deviation < mad_threshold
