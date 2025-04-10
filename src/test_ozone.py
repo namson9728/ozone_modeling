@@ -4,7 +4,8 @@ from ozone import Ozone
 import numpy as np
 from line_profiler import profile
 
-AM_DATA_PATH = '/Users/gkeating/newdata2/'
+#AM_DATA_PATH = '/Users/gkeating/newdata2/'
+AM_DATA_PATH = '/Users/namsonnguyen/repo/data/AM_Data/newdata2/'
 
 @pytest.fixture
 def ozone_object():
@@ -22,7 +23,7 @@ def model_spectrum_params(ozone_object):
     # Randomize which AM generated datafile to use for testing
     pwv_idx = random.randint(0, len(pwv_map) - 1)
     zenith_idx = random.randint(0, len(zenith_map) - 1)
-    model_spectrum, _, _ = ozone_object(pwv_map[pwv_idx], zenith_map[zenith_idx])
+    model_spectrum = ozone_object(pwv_map[pwv_idx], zenith_map[zenith_idx])
 
     return [model_spectrum, pwv_idx, zenith_idx]
 
@@ -80,12 +81,12 @@ def test_with_pwv_Jacobian(pwv_Jacobian_params):
 
     test_pwv_map = np.linspace(start_pwv, end_pwv, points)
 
-    base_spectrum, _, _ = my_ozone(start_pwv, zenith_angle)
-    expected_spectrum, _, _ = my_ozone(end_pwv, zenith_angle)
+    base_spectrum = my_ozone(start_pwv, zenith_angle)
+    expected_spectrum = my_ozone(end_pwv, zenith_angle)
 
     test_spectrum = base_spectrum
     for pwv in test_pwv_map:
-        _, pwv_jacobian, _ = my_ozone(pwv, zenith_angle, return_pwv_jacobian=True, return_model_spectrum=False)
+        pwv_jacobian = my_ozone(pwv, zenith_angle, return_pwv_jacobian=True, return_model_spectrum=False)
         little_jacobian = pwv_jacobian * ((end_pwv-start_pwv)/points)
         test_spectrum += little_jacobian
 
@@ -107,12 +108,12 @@ def test_with_zenith_Jacobian(zenith_Jacobian_params):
 
     zenith_map = np.linspace(start_zenith, end_zenith, points)
 
-    base_spectrum, _, _ = my_ozone(pwv, start_zenith)
-    expected_spectrum, _, _ = my_ozone(pwv, end_zenith)
+    base_spectrum = my_ozone(pwv, start_zenith)
+    expected_spectrum = my_ozone(pwv, end_zenith)
 
     test_spectrum = base_spectrum
     for zenith in zenith_map:
-        _, _, zenith_jacobian = my_ozone(pwv, zenith, return_zenith_jacobian=True, return_model_spectrum=False)
+        zenith_jacobian = my_ozone(pwv, zenith, return_zenith_jacobian=True, return_model_spectrum=False)
         little_jacobian = zenith_jacobian * ((end_zenith-start_zenith)/points)
         test_spectrum += little_jacobian
 
