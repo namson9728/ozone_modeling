@@ -335,6 +335,7 @@ class Ozone:
             self,
             pwv,
             zenith,
+            freq_arr=None,
             return_model_spectrum=True,
             return_pwv_jacobian=False,
             return_zenith_jacobian=False,
@@ -375,12 +376,19 @@ class Ozone:
             print(f"PWV -> nscale: {np.exp(self.lognscale):.2f}")
             print(f"zenith -> airmass: {np.exp(self.logairmass):.2f}")
 
+        return_args = []
         model_spectrum = None
         if return_model_spectrum:
             model_spectrum = self._interp_spectrum(
                 eval_airmass=[self.logairmass],
                 eval_nscale=[self.lognscale],
-        )
+            ).flatten()
+            if freq_arr is not None:
+                model_spectrum = np.interp(
+                    self.data['freq']['map'], model_spectrum, freq_arr.flatten() # type: ignore
+                ).reshape(freq_arr.shape)
+            return_args.append(model_spectrum)
+        
         pwv_jacobian = None
         if return_pwv_jacobian:
             nscale_to_pwv_normalization_factor = 1 / pwv
@@ -389,7 +397,12 @@ class Ozone:
                 eval_airmass=self.logairmass,
                 field="Nscale",
                 norm_factor=nscale_to_pwv_normalization_factor
-            )
+            ).flatten()
+            if freq_arr is not None:
+                pwv_jacobian = np.interp(
+                    self.data['freq']['map'], pwv_jacobian, freq_arr.flatten() # type: ignore
+                ).reshape(freq_arr.shape)
+            return_args.append(pwv_jacobian)
         zenith_jacobian = None
         if return_zenith_jacobian:
             airmass_to_zenith_normalization_factor = np.tan(zenith)
@@ -398,6 +411,14 @@ class Ozone:
                 eval_airmass=self.logairmass,
                 field="airmass",
                 norm_factor=airmass_to_zenith_normalization_factor
-            )
+            ).flatten()
+            if freq_arr is not None:
+                zenith_jacobian = np.interp(
+                    self.data['freq']['map'], zenith_jacobian, freq_arr.flatten() # type: ignore
+                ).reshape(freq_arr.shape)
+            return_args.append(zenith_jacobian)
 
-        return model_spectrum, pwv_jacobian, zenith_jacobian
+        if len(return_args) == 1:
+            return return_args[0]
+        else:
+            return return_args
