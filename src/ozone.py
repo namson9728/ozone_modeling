@@ -385,7 +385,7 @@ class Ozone:
             ).flatten()
             if freq_arr is not None:
                 model_spectrum = np.interp(
-                    self.data['freq']['map'], model_spectrum, freq_arr.flatten() # type: ignore
+                     freq_arr.flatten(), self.data['freq']['map'], model_spectrum # type: ignore
                 ).reshape(freq_arr.shape)
             return_args.append(model_spectrum)
         
@@ -400,7 +400,7 @@ class Ozone:
             ).flatten()
             if freq_arr is not None:
                 pwv_jacobian = np.interp(
-                    self.data['freq']['map'], pwv_jacobian, freq_arr.flatten() # type: ignore
+                    freq_arr.flatten(), self.data['freq']['map'], pwv_jacobian # type: ignore
                 ).reshape(freq_arr.shape)
             return_args.append(pwv_jacobian)
         zenith_jacobian = None
@@ -414,7 +414,7 @@ class Ozone:
             ).flatten()
             if freq_arr is not None:
                 zenith_jacobian = np.interp(
-                    self.data['freq']['map'], zenith_jacobian, freq_arr.flatten() # type: ignore
+                    freq_arr.flatten(), self.data['freq']['map'], zenith_jacobian # type: ignore
                 ).reshape(freq_arr.shape)
             return_args.append(zenith_jacobian)
 
