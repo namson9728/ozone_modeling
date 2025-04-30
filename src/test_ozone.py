@@ -12,20 +12,17 @@ def ozone_object():
     return Ozone(am_model_data_path=AM_DATA_PATH)
 
 @pytest.fixture
-def model_spectrum_params(ozone_object):
-    nscale_map = ozone_object.data['Nscale']['map']
-    nominal_pwv = ozone_object._extract_nominal_pwv()
-    pwv_map = nominal_pwv * np.exp(nscale_map)
+def AM_Tb_spectrum_params(ozone_object):
+    logairmass = 0.001
+    logNscale = 0.125
+    filename = f'MaunaKea_Tb_Spectrum_{logairmass:.3f}_{logNscale:+.3f}'
+    data = np.load(f'{ozone_object.am_model_data_path}{filename}.out')
+    model_spectrum = data[:,2]
 
-    airmass_map = np.exp(ozone_object.data['airmass']['map'])
-    zenith_map = ozone_object._airmass_to_zenith(airmass_map)
+    zenith_angle = ozone_object._airmass_to_zenith(np.exp(logairmass))
+    pwv = (np.exp(logNscale))*ozone_object.nominal_pwv
 
-    # Randomize which AM generated datafile to use for testing
-    pwv_idx = random.randint(0, len(pwv_map) - 1)
-    zenith_idx = random.randint(0, len(zenith_map) - 1)
-    model_spectrum = ozone_object(pwv_map[pwv_idx], zenith_map[zenith_idx])
-
-    return [model_spectrum, pwv_idx, zenith_idx]
+    return [model_spectrum, pwv, zenith_angle]
 
 
 @pytest.fixture
@@ -54,13 +51,13 @@ def zenith_Jacobian_params(ozone_object):
     return [ozone_object, start_zenith, end_zenith, pwv, points]
 
 @profile
-def test_cross_check_with_AM(model_spectrum_params, ozone_object):
-    model_spectrum = model_spectrum_params[0]
-    pwv_idx = model_spectrum_params[1]
-    zenith_idx = model_spectrum_params[2]
+def test_cross_check_with_AM(AM_Tb_spectrum_params, ozone_object):
+    Tb_spectrum = AM_Tb_spectrum_params[0]
+    pwv = AM_Tb_spectrum_params[1]
+    zenith_angle = AM_Tb_spectrum_params[2]
 
-    Tb_data = ozone_object.data['Tb_scalar_field'][pwv_idx][zenith_idx].reshape(model_spectrum.shape)
-    difference_spectrum = ((model_spectrum - Tb_data) / Tb_data) * 100
+    model_spectrum = ozone_object(pwv, zenith_angle)
+    difference_spectrum = ((model_spectrum - Tb_spectrum) / Tb_spectrum) * 100
 
     threshold = 1    # 1%
     max_deviation = np.percentile(difference_spectrum, 99)
