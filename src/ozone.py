@@ -53,18 +53,19 @@ class Ozone:
         self.logairmass = None
         self.nominal_pwv = self._extract_nominal_pwv()
 
-        Nscale_map = self.data['Nscale']['map']
         Tb_scalar_field = self.data['Tb_scalar_field']
+        Nscale_map = self.data['Nscale']['map']
         Nscale_jacobian = self.data['Nscale']['jacobian']
+        airmass_map = self.data['airmass']['map']
+        airmass_jacobian = self.data['airmass']['jacobian']
+        freq_map = self.data['freq']['map']
 
         self.lognscale_jacobian_interp_func = RegularGridInterpolator(
-            points=(self.data['Nscale']['map'], self.data['airmass']['map'], self.data['freq']['map']), 
-            values=self.data['Nscale']['jacobian'], method="linear"
+            points=(Nscale_map, airmass_map, freq_map), values=Nscale_jacobian, method="linear"
         )
 
         self.logairmass_jacobian_interp_func = RegularGridInterpolator(
-            points=(self.data['Nscale']['map'], self.data['airmass']['map'], self.data['freq']['map']), 
-            values=self.data['airmass']['jacobian'], method="linear"
+            points=(Nscale_map, airmass_map, freq_map), values=airmass_jacobian, method="linear"
         )
 
         self.CubicHermiteSplineInterp_func = CubicHermiteSpline(
@@ -74,15 +75,23 @@ class Ozone:
             axis=0,
         )
 
-        self.cubic_interp_dict = {}
+        self.nscale_cubic_interp_dict = {}
         for idx in range(len(self.data['airmass']['map'])):
-            self.cubic_interp_dict[idx] = CubicHermiteSpline(
+            self.nscale_cubic_interp_dict[idx] = CubicHermiteSpline(
                 x=Nscale_map,
                 y=Tb_scalar_field[:, idx:idx+1, :],
                 dydx=Nscale_jacobian[:, idx:idx+1, :],
                 axis=0,
             )
 
+        self.airmass_cubic_interp_dict = {}
+        for idx in range(len(self.data['Nscale']['map'])):
+            self.airmass_cubic_interp_dict[idx] = CubicHermiteSpline(
+                x=airmass_map,
+                y=Tb_scalar_field[idx:idx+1, :, :],
+                dydx=airmass_jacobian[idx:idx+1, :, :],
+                axis=1,
+            )
     def _load_model_data(self, freq_range=None):
         """Returns the AM generated data stored in a dictionary.
 
@@ -270,19 +279,32 @@ class Ozone:
         '''
         # But we _only_ need the nearest two airmasses for the interpolation
         airmass_map = self.data['airmass']['map']
+        nscale_map = self.data['Nscale']['map']
         assert (eval_airmass >= airmass_map[0]) and (eval_airmass <= airmass_map[-1]), (
             "eval_airmass out of bounds!"
         )
+        assert (eval_nscale >= nscale_map[0]) and (eval_nscale <= nscale_map[-1]), (
+            "nscale out of bounds!"
+        )
+
+        # Figure out index and slice info...
+        # First do airmass
         right_airmass_idx = np.searchsorted(airmass_map, eval_airmass[0], 'right')
         if right_airmass_idx == len(airmass_map):
             right_airmass_idx -= 1
         left_airmass_idx = right_airmass_idx - 1
         airmass_slice = slice(left_airmass_idx, right_airmass_idx + 1)
+        # Next do nscale
+        right_nscale_idx = np.searchsorted(nscale_map, eval_nscale[0], 'right')
+        if right_nscale_idx == len(nscale_map):
+            right_nscale_idx -= 1
+        left_nscale_idx = right_nscale_idx - 1
+        nscale_slice = slice(left_nscale_idx, right_nscale_idx + 1)
 
         first_eval = np.concatenate(
             (
-                self.cubic_interp_dict[left_airmass_idx](eval_nscale),
-                self.cubic_interp_dict[right_airmass_idx](eval_nscale),
+                self.nscale_cubic_interp_dict[left_airmass_idx](eval_nscale),
+                self.nscale_cubic_interp_dict[right_airmass_idx](eval_nscale),
             ),
             axis=1,
         )
@@ -297,7 +319,31 @@ class Ozone:
             x=airmass_map[airmass_slice], y=first_eval, dydx=mod_jacobian, axis=1
         )
 
-        return final_interp_func(eval_airmass)
+        na_interp = final_interp_func(eval_airmass)
+
+        # Now map out airmass -> nscale 
+        first_eval = np.concatenate(
+            (
+                self.airmass_cubic_interp_dict[left_nscale_idx](eval_airmass),
+                self.airmass_cubic_interp_dict[right_nscale_idx](eval_airmass),
+            ),
+            axis=0,
+        )
+
+        # Interpolate for nscale Jacobian at the chosen nscale
+        mod_jacobian = self._bilinear_jacobian_interp(
+            eval_nscale=nscale_slice,
+            eval_airmass=eval_airmass[0],
+            field="Nscale"
+        )
+        final_interp_func = CubicHermiteSpline(
+            x=nscale_map[nscale_slice], y=first_eval, dydx=mod_jacobian, axis=0
+        )
+
+        an_interp = final_interp_func(eval_nscale)
+
+        return (an_interp + na_interp) * 0.5
+
     
     def _extract_nominal_pwv(self):
         """Returns the nominal pwv value extracted from one of the AM .err files.
