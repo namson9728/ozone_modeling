@@ -65,7 +65,7 @@ def test_cross_check_with_AM(AM_Tb_spectrum_params, ozone_object):
     assert max_deviation < threshold
 
     threshold = 0.1
-    mad = np.sum(difference_spectrum - np.mean(difference_spectrum))/len(difference_spectrum)
+    mad = np.median(np.abs(difference_spectrum))
     assert mad < threshold
 
 @profile
