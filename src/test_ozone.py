@@ -5,7 +5,7 @@ import numpy as np
 from line_profiler import profile
 
 #AM_DATA_PATH = '/Users/gkeating/newdata2/'
-AM_DATA_PATH = '/Users/namsonnguyen/repo/data/AM_Data/newdata2/'
+AM_DATA_PATH = '/Users/namsonnguyen/repo/data/AM_Data/SON50_w_opacity/'
 
 @pytest.fixture
 def ozone_object():
@@ -17,12 +17,12 @@ def AM_Tb_spectrum_params(ozone_object):
     logNscale = 0.125
     filename = f'MaunaKea_Tb_Spectrum_{logairmass:.3f}_{logNscale:+.3f}'
     data = np.load(f'{ozone_object.am_model_data_path}{filename}.out')
-    model_spectrum = data[:,2]
+    Tb_model_spectrum = data[:,4]
 
     zenith_angle = ozone_object._airmass_to_zenith(np.exp(logairmass))
     pwv = (np.exp(logNscale))*ozone_object.nominal_pwv
 
-    return [model_spectrum, pwv, zenith_angle]
+    return [Tb_model_spectrum, pwv, zenith_angle]
 
 
 @pytest.fixture
