@@ -461,6 +461,9 @@ class Ozone:
             return_zenith_jacobian : bool
                 Set this value to `True` to have the call return a calculated zenith angle Jacobian.
                 (Default `False`)
+            return_opacity_pair : bool
+                Set this value to `True` to have the call calculate and return the respective opacity spectrum. The return tuple will return in order of pairs of Tb and tau.
+                (Default `False`)
             toString : bool
                 Set this value to `True` to have the call print out the converted NScale and airmass value.
                 (Default `False`)
