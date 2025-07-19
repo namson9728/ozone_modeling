@@ -29,20 +29,23 @@ class Ozone:
     Format of `data` dictionary:
     ```
     {'airmass':{
-        'map':airmass_map,
-        'jacobian':airmass_jacobian,
-        'points':airmass_points
-    },
+            'map':logairmass_map,
+            'dTb':dTb_airmass,
+            'dTau':dTau_airmass,
+            'points':logairmass_points
+        },
     'Nscale':{
-        'map':Nscale_map,
-        'jacobian':Nscale_jacobian,
-        'points':Nscale_points
-    },
+        'map':logNscale_map,
+        'dTb':dTb_nscale,
+        'dTau':dTau_nscale,
+        'points':logNscale_points
+        },
     'freq':{
         'map':freq_map,
         'points':freq_points
-    },
-    'Tb_scalar_field':Tb_scalar_field
+        },
+    'Tb_scalar_field':Tb_scalar_field,
+    'tau_scalar_field':tau_scalar_field
     }
     ```
     """
@@ -53,56 +56,98 @@ class Ozone:
         self.logairmass = None
         self.nominal_pwv = self._extract_nominal_pwv()
 
-        Nscale_map = self.data['Nscale']['map']
         Tb_scalar_field = self.data['Tb_scalar_field']
-        Nscale_jacobian = self.data['Nscale']['jacobian']
+        tau_scalar_field = self.data['tau_scalar_field']
+        Nscale_map = self.data['Nscale']['map']
+        dTb_nscale = self.data['Nscale']['dTb']
+        dTau_nscale = self.data['Nscale']['dTau']
+        airmass_map = self.data['airmass']['map']
+        dTb_airmass = self.data['airmass']['dTb']
+        dTau_airmass = self.data['airmass']['dTau']
+        freq_map = self.data['freq']['map']
 
-        self.lognscale_jacobian_interp_func = RegularGridInterpolator(
-            points=(self.data['Nscale']['map'], self.data['airmass']['map'], self.data['freq']['map']), 
-            values=self.data['Nscale']['jacobian'], method="linear"
+        self.lognscale_dTb_interp_func = RegularGridInterpolator(
+            points=(Nscale_map, airmass_map, freq_map), values=dTb_nscale, method="linear"
+        )
+        self.logairmass_dTb_interp_func = RegularGridInterpolator(
+            points=(Nscale_map, airmass_map, freq_map), values=dTb_airmass, method="linear"
         )
 
-        self.logairmass_jacobian_interp_func = RegularGridInterpolator(
-            points=(self.data['Nscale']['map'], self.data['airmass']['map'], self.data['freq']['map']), 
-            values=self.data['airmass']['jacobian'], method="linear"
+        self.lognscale_dTau_interp_func = RegularGridInterpolator(
+            points=(Nscale_map, airmass_map, freq_map), values=dTau_nscale, method="linear"
+        )
+        self.logairmass_dTau_interp_func = RegularGridInterpolator(
+            points=(Nscale_map, airmass_map, freq_map), values=dTau_airmass, method="linear"
         )
 
-        self.CubicHermiteSplineInterp_func = CubicHermiteSpline(
+        self.TbCubicHermiteSplineInterp_func = CubicHermiteSpline(
             x=Nscale_map,
             y=Tb_scalar_field,
-            dydx=Nscale_jacobian,
+            dydx=dTb_nscale,
             axis=0,
         )
-
-        self.cubic_interp_dict = {}
+        self.Tb_nscale_cubic_interp_dict = {}
         for idx in range(len(self.data['airmass']['map'])):
-            self.cubic_interp_dict[idx] = CubicHermiteSpline(
+            self.Tb_nscale_cubic_interp_dict[idx] = CubicHermiteSpline(
                 x=Nscale_map,
                 y=Tb_scalar_field[:, idx:idx+1, :],
-                dydx=Nscale_jacobian[:, idx:idx+1, :],
+                dydx=dTb_nscale[:, idx:idx+1, :],
                 axis=0,
             )
-
+        self.Tb_airmass_cubic_interp_dict = {}
+        for idx in range(len(self.data['Nscale']['map'])):
+            self.Tb_airmass_cubic_interp_dict[idx] = CubicHermiteSpline(
+                x=airmass_map,
+                y=Tb_scalar_field[idx:idx+1, :, :],
+                dydx=dTb_airmass[idx:idx+1, :, :],
+                axis=1,
+            )
+        
+        self.tauCubicHermiteSplineInterp_func = CubicHermiteSpline(
+            x=Nscale_map,
+            y=tau_scalar_field,
+            dydx=dTb_nscale,
+            axis=0,
+        )
+        self.tau_nscale_cubic_interp_dict = {}
+        for idx in range(len(self.data['airmass']['map'])):
+            self.tau_nscale_cubic_interp_dict[idx] = CubicHermiteSpline(
+                x=Nscale_map,
+                y=tau_scalar_field[:, idx:idx+1, :],
+                dydx=dTau_nscale[:, idx:idx+1, :],
+                axis=0,
+            )
+        self.tau_airmass_cubic_interp_dict = {}
+        for idx in range(len(self.data['Nscale']['map'])):
+            self.tau_airmass_cubic_interp_dict[idx] = CubicHermiteSpline(
+                x=airmass_map,
+                y=tau_scalar_field[idx:idx+1, :, :],
+                dydx=dTau_airmass[idx:idx+1, :, :],
+                axis=1,
+            )
     def _load_model_data(self, freq_range=None):
         """Returns the AM generated data stored in a dictionary.
 
         The dictionary is in the following format:
         ```
         {'airmass':{
-            'map':airmass_map,
-            'jacobian':airmass_jacobian,
-            'points':airmass_points
+            'map':logairmass_map,
+            'dTb':dTb_airmass,
+            'dTau':dTau_airmass,
+            'points':logairmass_points
         },
         'Nscale':{
-            'map':Nscale_map,
-            'jacobian':Nscale_jacobian,
-            'points':Nscale_points
+            'map':logNscale_map,
+            'dTb':dTb_nscale,
+            'dTau':dTau_nscale,
+            'points':logNscale_points
         },
         'freq':{
             'map':freq_map,
             'points':freq_points
         },
-        'Tb_scalar_field':Tb_scalar_field
+        'Tb_scalar_field':Tb_scalar_field,
+        'tau_scalar_field':tau_scalar_field
         }
         ```
         """
@@ -127,33 +172,44 @@ class Ozone:
                     freq_map = freq_map[freq_mask]
 
                     freq_points = len(freq_map)
-                    Tb_scalar_field = np.zeros((logNscale_points, logairmass_points, freq_points))
-                    Nscale_jacobian = np.zeros((logNscale_points, logairmass_points, freq_points))
-                    airmass_jacobian = np.zeros((logNscale_points, logairmass_points, freq_points))
-                    init_arr = False
+                    tau_scalar_field = np.zeros((logNscale_points, logairmass_points, freq_points))
+                    dTau_nscale = np.zeros((logNscale_points, logairmass_points, freq_points))
+                    dTau_airmass = np.zeros((logNscale_points, logairmass_points, freq_points))
 
-                Tb_scalar_field[idx,jdx] = data[freq_mask, 2]
-                airmass_jacobian[idx,jdx] = data[freq_mask,3] / np.sqrt(np.exp(2*logairmass)-1)
-                Nscale_jacobian[idx,jdx] = data[freq_mask, 4] * np.exp(logNscale)
+                    Tb_scalar_field = np.zeros((logNscale_points, logairmass_points, freq_points))
+                    dTb_nscale = np.zeros((logNscale_points, logairmass_points, freq_points))
+                    dTb_airmass = np.zeros((logNscale_points, logairmass_points, freq_points))
+                    init_arr = False
+                
+                tau_scalar_field[idx,jdx] = data[freq_mask, 1]
+                dTau_airmass[idx,jdx] = data[freq_mask,2] / np.sqrt(np.exp(2*logairmass)-1)
+                dTau_nscale[idx,jdx] = data[freq_mask, 3] * np.exp(logNscale)
+
+                Tb_scalar_field[idx,jdx] = data[freq_mask, 4]
+                dTb_airmass[idx,jdx] = data[freq_mask,5] / np.sqrt(np.exp(2*logairmass)-1)
+                dTb_nscale[idx,jdx] = data[freq_mask, 6] * np.exp(logNscale)
 
         return {'airmass':{
                 'map':logairmass_map,
-                'jacobian':airmass_jacobian,
+                'dTb':dTb_airmass,
+                'dTau':dTau_airmass,
                 'points':logairmass_points
             },
             'Nscale':{
                 'map':logNscale_map,
-                'jacobian':Nscale_jacobian,
+                'dTb':dTb_nscale,
+                'dTau':dTau_nscale,
                 'points':logNscale_points
             },
             'freq':{
                 'map':freq_map,
                 'points':freq_points
             },
-            'Tb_scalar_field':Tb_scalar_field
+            'Tb_scalar_field':Tb_scalar_field,
+            'tau_scalar_field':tau_scalar_field
             }
     
-    def _2DCubicHermiteSpline(self, eval_airmass, eval_nscale, init_interp_func):
+    def _2DCubicHermiteSpline(self, eval_airmass, eval_nscale, init_interp_func, logairmass_interp_func):
         '''Returns the interpolation of the data given an airmass and nscale value.
 
         Args:
@@ -186,7 +242,7 @@ class Ozone:
             indexing='ij',
         )
 
-        mod_jacobian = self.logairmass_jacobian_interp_func(
+        mod_jacobian = logairmass_interp_func(
             (x.flatten(),y.flatten(),z.flatten())
         ).reshape(x.shape)
 
@@ -212,13 +268,15 @@ class Ozone:
         return spectrum
 
     def _bilinear_jacobian_interp(
-        self, eval_nscale: float | slice, eval_airmass: float | slice, field, norm_factor=None
+        self, eval_nscale: float | slice, eval_airmass: float | slice, field, scalar_field: str, norm_factor=None
     ):
         """Returns the interpolation spectrum using the provided 2DRegularGrid interpolation function.
 
         A normalization factor can be provided which is multiplied to the entire spectrum.
         """
-        data = self.data[field]['jacobian']
+        if not any(scalar_field == s for s in ['dTb', 'dTau']):
+            raise TypeError("scalar_field must be either \'dTb\' or \'dTau\'")
+        data = self.data[field][scalar_field]
         index_dict = {"Nscale": [eval_nscale],  "airmass": [eval_airmass]}
         weights_dict = {"Nscale": [1], "airmass": [1]}
 
@@ -259,7 +317,8 @@ class Ozone:
 
         return result if norm_factor is None else (result * norm_factor)
 
-    def _interp_spectrum(self, eval_airmass, eval_nscale):
+    def _interp_spectrum(self, eval_airmass, eval_nscale, scalar_field: str, 
+                         airmass_cubic_interp_dict, nscale_cubic_interp_dict):
         '''Returns the interpolation of the data given an airmass and nscale value.
 
         Args:
@@ -270,34 +329,75 @@ class Ozone:
         '''
         # But we _only_ need the nearest two airmasses for the interpolation
         airmass_map = self.data['airmass']['map']
+        nscale_map = self.data['Nscale']['map']
         assert (eval_airmass >= airmass_map[0]) and (eval_airmass <= airmass_map[-1]), (
             "eval_airmass out of bounds!"
         )
+        assert (eval_nscale >= nscale_map[0]) and (eval_nscale <= nscale_map[-1]), (
+            "nscale out of bounds!"
+        )
+
+        # Figure out index and slice info...
+        # First do airmass
         right_airmass_idx = np.searchsorted(airmass_map, eval_airmass[0], 'right')
         if right_airmass_idx == len(airmass_map):
             right_airmass_idx -= 1
         left_airmass_idx = right_airmass_idx - 1
         airmass_slice = slice(left_airmass_idx, right_airmass_idx + 1)
+        # Next do nscale
+        right_nscale_idx = np.searchsorted(nscale_map, eval_nscale[0], 'right')
+        if right_nscale_idx == len(nscale_map):
+            right_nscale_idx -= 1
+        left_nscale_idx = right_nscale_idx - 1
+        nscale_slice = slice(left_nscale_idx, right_nscale_idx + 1)
 
         first_eval = np.concatenate(
             (
-                self.cubic_interp_dict[left_airmass_idx](eval_nscale),
-                self.cubic_interp_dict[right_airmass_idx](eval_nscale),
+                nscale_cubic_interp_dict[left_airmass_idx](eval_nscale),
+                nscale_cubic_interp_dict[right_airmass_idx](eval_nscale),
             ),
             axis=1,
         )
 
+        if not any(scalar_field == s for s in ['dTb', 'dTau']):
+            raise TypeError("scalar_field must be either \'dTb\' or \'dTau\'")
         # Interpolate for nscale Jacobian at the chosen nscale
         mod_jacobian = self._bilinear_jacobian_interp(
             eval_nscale=eval_nscale[0],
             eval_airmass=airmass_slice,
+            scalar_field=scalar_field,
             field="airmass"
         )
         final_interp_func = CubicHermiteSpline(
             x=airmass_map[airmass_slice], y=first_eval, dydx=mod_jacobian, axis=1
         )
 
-        return final_interp_func(eval_airmass)
+        na_interp = final_interp_func(eval_airmass)
+
+        # Now map out airmass -> nscale 
+        first_eval = np.concatenate(
+            (
+                airmass_cubic_interp_dict[left_nscale_idx](eval_airmass),
+                airmass_cubic_interp_dict[right_nscale_idx](eval_airmass),
+            ),
+            axis=0,
+        )
+
+        # Interpolate for nscale Jacobian at the chosen nscale
+        mod_jacobian = self._bilinear_jacobian_interp(
+            eval_nscale=nscale_slice,
+            eval_airmass=eval_airmass[0],
+            scalar_field=scalar_field,
+            field="Nscale"
+        )
+        final_interp_func = CubicHermiteSpline(
+            x=nscale_map[nscale_slice], y=first_eval, dydx=mod_jacobian, axis=0
+        )
+
+        an_interp = final_interp_func(eval_nscale)
+
+        return (an_interp + na_interp) * 0.5
+
     
     def _extract_nominal_pwv(self):
         """Returns the nominal pwv value extracted from one of the AM .err files.
@@ -339,6 +439,7 @@ class Ozone:
             return_model_spectrum=True,
             return_pwv_jacobian=False,
             return_zenith_jacobian=False,
+            return_opacity_pair=False,
             toString=False,
         ):
         """Returns the model Tb spectrum, PWV Jacobian, and zenith angle Jacobian given a pwv and zenith angle value.
@@ -359,6 +460,9 @@ class Ozone:
                 (Default `False`)
             return_zenith_jacobian : bool
                 Set this value to `True` to have the call return a calculated zenith angle Jacobian.
+                (Default `False`)
+            return_opacity_pair : bool
+                Set this value to `True` to have the call calculate and return the respective opacity spectrum. The return tuple will return in order of pairs of Tb and tau.
                 (Default `False`)
             toString : bool
                 Set this value to `True` to have the call print out the converted NScale and airmass value.
@@ -382,12 +486,28 @@ class Ozone:
             model_spectrum = self._interp_spectrum(
                 eval_airmass=[self.logairmass],
                 eval_nscale=[self.lognscale],
+                scalar_field='dTb',
+                airmass_cubic_interp_dict=self.Tb_airmass_cubic_interp_dict,
+                nscale_cubic_interp_dict=self.Tb_nscale_cubic_interp_dict
             ).flatten()
             if freq_arr is not None:
                 model_spectrum = np.interp(
                      freq_arr.flatten(), self.data['freq']['map'], model_spectrum # type: ignore
                 ).reshape(freq_arr.shape)
             return_args.append(model_spectrum)
+            if return_opacity_pair:
+                model_spectrum = self._interp_spectrum(
+                    eval_airmass=[self.logairmass],
+                    eval_nscale=[self.lognscale],
+                    scalar_field='dTau',
+                    airmass_cubic_interp_dict=self.tau_airmass_cubic_interp_dict,
+                    nscale_cubic_interp_dict=self.tau_nscale_cubic_interp_dict
+                ).flatten()
+                if freq_arr is not None:
+                    model_spectrum = np.interp(
+                        freq_arr.flatten(), self.data['freq']['map'], model_spectrum # type: ignore
+                    ).reshape(freq_arr.shape)
+                return_args.append(model_spectrum)
         
         pwv_jacobian = None
         if return_pwv_jacobian:
@@ -396,6 +516,7 @@ class Ozone:
                 eval_nscale=self.lognscale,
                 eval_airmass=self.logairmass,
                 field="Nscale",
+                scalar_field='dTb',
                 norm_factor=nscale_to_pwv_normalization_factor
             ).flatten()
             if freq_arr is not None:
@@ -403,6 +524,20 @@ class Ozone:
                     freq_arr.flatten(), self.data['freq']['map'], pwv_jacobian # type: ignore
                 ).reshape(freq_arr.shape)
             return_args.append(pwv_jacobian)
+            if return_opacity_pair:
+                pwv_jacobian = self._bilinear_jacobian_interp(
+                    eval_nscale=self.lognscale,
+                    eval_airmass=self.logairmass,
+                    field="Nscale",
+                    scalar_field='dTau',
+                    norm_factor=nscale_to_pwv_normalization_factor
+                ).flatten()
+                if freq_arr is not None:
+                    pwv_jacobian = np.interp(
+                        freq_arr.flatten(), self.data['freq']['map'], pwv_jacobian # type: ignore
+                    ).reshape(freq_arr.shape)
+                return_args.append(pwv_jacobian)
+
         zenith_jacobian = None
         if return_zenith_jacobian:
             airmass_to_zenith_normalization_factor = np.tan(zenith)
@@ -410,6 +545,7 @@ class Ozone:
                 eval_nscale=self.lognscale,
                 eval_airmass=self.logairmass,
                 field="airmass",
+                scalar_field='dTb',
                 norm_factor=airmass_to_zenith_normalization_factor
             ).flatten()
             if freq_arr is not None:
@@ -417,6 +553,19 @@ class Ozone:
                     freq_arr.flatten(), self.data['freq']['map'], zenith_jacobian # type: ignore
                 ).reshape(freq_arr.shape)
             return_args.append(zenith_jacobian)
+            if return_opacity_pair:
+                zenith_jacobian = self._bilinear_jacobian_interp(
+                    eval_nscale=self.lognscale,
+                    eval_airmass=self.logairmass,
+                    field="airmass",
+                    scalar_field='dTau',
+                    norm_factor=airmass_to_zenith_normalization_factor
+                ).flatten()
+                if freq_arr is not None:
+                    zenith_jacobian = np.interp(
+                        freq_arr.flatten(), self.data['freq']['map'], zenith_jacobian # type: ignore
+                    ).reshape(freq_arr.shape)
+                return_args.append(zenith_jacobian)
 
         if len(return_args) == 1:
             return return_args[0]
