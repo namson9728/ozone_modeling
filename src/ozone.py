@@ -431,7 +431,7 @@ class Ozone:
         """
         return np.arccos(1/airmass)
     
-    def calc_t_star(self, pwv, zenith, receiver_temp, freq_arr=None):
+    def calc_t_star(self, pwv, zenith, receiver_temp, freq_arr=None, return_Tsky=False, return_tau=False):
         
         self.lognscale = np.log(pwv / self.nominal_pwv)
         self.logairmass = np.log(self._zenith_to_airmass(zenith))
@@ -466,7 +466,13 @@ class Ozone:
 
         T_star = (Trx + Tsky) / np.exp(-tau)
 
-        return T_star   # FIX ME!
+        return_args = [T_star]
+        if return_Tsky:
+            return_args.append(Tsky)
+        if return_tau:
+            return_args.append(tau)
+
+        return T_star, Tsky, tau
 
     def __call__(
             self,
