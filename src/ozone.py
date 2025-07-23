@@ -430,6 +430,43 @@ class Ozone:
         """Returns the provided airmass into the equivalent zenith angle in radians.
         """
         return np.arccos(1/airmass)
+    
+    def calc_t_star(self, pwv, zenith, receiver_temp, freq_arr=None):
+        
+        self.lognscale = np.log(pwv / self.nominal_pwv)
+        self.logairmass = np.log(self._zenith_to_airmass(zenith))
+
+        Tb_spectrum = self._interp_spectrum(
+            eval_airmass=[self.logairmass],
+            eval_nscale=[self.lognscale],
+            scalar_field='dTb',
+            airmass_cubic_interp_dict=self.Tb_airmass_cubic_interp_dict,
+            nscale_cubic_interp_dict=self.Tb_nscale_cubic_interp_dict
+        ).flatten()
+        if freq_arr is not None:
+            Tb_spectrum = np.interp(
+                    freq_arr.flatten(), self.data['freq']['map'], model_spectrum # type: ignore
+            ).reshape(freq_arr.shape)
+
+        tau_spectrum = self._interp_spectrum(
+                eval_airmass=[self.logairmass],
+                eval_nscale=[self.lognscale],
+                scalar_field='dTau',
+                airmass_cubic_interp_dict=self.tau_airmass_cubic_interp_dict,
+                nscale_cubic_interp_dict=self.tau_nscale_cubic_interp_dict
+            ).flatten()
+        if freq_arr is not None:
+            tau_spectrum = np.interp(
+                freq_arr.flatten(), self.data['freq']['map'], model_spectrum # type: ignore
+            ).reshape(freq_arr.shape)
+
+        Trx = receiver_temp
+        Tsky = Tb_spectrum
+        tau = tau_spectrum
+
+        T_star = (Trx + Tsky) / np.exp(-tau)
+
+        return T_star   # FIX ME!
 
     def __call__(
             self,
