@@ -431,10 +431,27 @@ class Ozone:
         """
         return np.arccos(1/airmass)
     
-    def calc_t_star(self, pwv, zenith, receiver_temp, freq_arr=None, return_Tsky=False, return_tau=False):
-        
+    def calc_t_star(self, pwv, za, receiver_temp, freq_arr=None, return_Tsky=False, return_tau=False):
+        """Returns the opacity corrected system temperature for an SMA receiver.
+
+        Args:
+            pwv : float
+                The percent water vapor of the atmosphere
+            za : float
+                The zenith angle (elevation) of the antenna in radians
+            receiver_temp : float
+                The temperature of the receiver in K
+            freq_arr : array
+                The frequency array of the model
+            return_Tsky : bool
+                Switch to `True` to additionally return the Raleigh-Jeans brightness spectrum
+                (Default `False`)
+            return_tau : bool
+                Switch to `True` to additionally return the opacity spectrum
+                (Default `False`)
+        """
         self.lognscale = np.log(pwv / self.nominal_pwv)
-        self.logairmass = np.log(self._zenith_to_airmass(zenith))
+        self.logairmass = np.log(self._zenith_to_airmass(za))
 
         Tb_spectrum = self._interp_spectrum(
             eval_airmass=[self.logairmass],
