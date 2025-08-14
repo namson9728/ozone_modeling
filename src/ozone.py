@@ -274,8 +274,8 @@ class Ozone:
 
         A normalization factor can be provided which is multiplied to the entire spectrum.
         """
-        if not any(scalar_field == s for s in ['dTb', 'dTau']):
-            raise TypeError("scalar_field must be either \'dTb\' or \'dTau\'")
+        if not any(scalar_field == s for s in ['dTb', 'dTau', 'dL']):
+            raise TypeError("scalar_field must be either \'dTb\' or \'dTau\' or \'dL\'")
         data = self.data[field][scalar_field]
         index_dict = {"Nscale": [eval_nscale],  "airmass": [eval_airmass]}
         weights_dict = {"Nscale": [1], "airmass": [1]}

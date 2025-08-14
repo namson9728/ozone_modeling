@@ -1,0 +1,4 @@
+#!/bin/bash
+
+        /Users/namsonnguyen/repo/am-14.0/src/am MaunaKea_SON_50.amc         210 GHz 240 GHz 200 MHz 1.289335381956981 rad 277 K 2.718281828459045         > /Users/namsonnguyen/repo/data/AM_data/SON50_delay_spectra/MaunaKea_Delay_Spectrum_1.281_1.000.out         2> /Users/namsonnguyen/repo/data/AM_data/SON50_delay_spectra/MaunaKea_Delay_Spectrum_1.281_1.000.err
+        
