@@ -58,13 +58,17 @@ class Ozone:
 
         Tb_scalar_field = self.data['Tb_scalar_field']
         tau_scalar_field = self.data['tau_scalar_field']
+        L_scalar_field = self.data['L_scalar_field']
         Nscale_map = self.data['Nscale']['map']
         dTb_nscale = self.data['Nscale']['dTb']
         dTau_nscale = self.data['Nscale']['dTau']
+        dL_nscale = self.data['Nscale']['dL']
         airmass_map = self.data['airmass']['map']
         dTb_airmass = self.data['airmass']['dTb']
         dTau_airmass = self.data['airmass']['dTau']
+        dL_airmass = self.data['airmass']['dL']
         freq_map = self.data['freq']['map']
+        L_freq_map = self.data['freq']['L_map']
 
         self.lognscale_dTb_interp_func = RegularGridInterpolator(
             points=(Nscale_map, airmass_map, freq_map), values=dTb_nscale, method="linear"
@@ -78,6 +82,13 @@ class Ozone:
         )
         self.logairmass_dTau_interp_func = RegularGridInterpolator(
             points=(Nscale_map, airmass_map, freq_map), values=dTau_airmass, method="linear"
+        )
+
+        self.lognscale_dL_interp_func = RegularGridInterpolator(
+            points=(Nscale_map, airmass_map, L_freq_map), values=dL_nscale, method="linear"
+        )
+        self.logairmass_dL_interp_func = RegularGridInterpolator(
+            points=(Nscale_map, airmass_map, L_freq_map), values=dL_airmass, method="linear"
         )
 
         self.TbCubicHermiteSplineInterp_func = CubicHermiteSpline(
@@ -123,6 +134,29 @@ class Ozone:
                 x=airmass_map,
                 y=tau_scalar_field[idx:idx+1, :, :],
                 dydx=dTau_airmass[idx:idx+1, :, :],
+                axis=1,
+            )
+
+        self.LCubicHermiteSplineInterp_func = CubicHermiteSpline(
+            x=Nscale_map,
+            y=L_scalar_field,
+            dydx=dL_nscale,
+            axis=0,
+        )
+        self.L_nscale_cubic_interp_dict = {}
+        for idx in range(len(self.data['airmass']['map'])):
+            self.L_nscale_cubic_interp_dict[idx] = CubicHermiteSpline(
+                x=Nscale_map,
+                y=L_scalar_field[:, idx:idx+1, :],
+                dydx=dL_nscale[:, idx:idx+1, :],
+                axis=0,
+            )
+        self.L_airmass_cubic_interp_dict = {}
+        for idx in range(len(self.data['Nscale']['map'])):
+            self.L_airmass_cubic_interp_dict[idx] = CubicHermiteSpline(
+                x=airmass_map,
+                y=L_scalar_field[idx:idx+1, :, :],
+                dydx=dL_airmass[idx:idx+1, :, :],
                 axis=1,
             )
     def _load_model_data(self, freq_range=None):
@@ -179,7 +213,6 @@ class Ozone:
                     Tb_scalar_field = np.zeros((logNscale_points, logairmass_points, freq_points))
                     dTb_nscale = np.zeros((logNscale_points, logairmass_points, freq_points))
                     dTb_airmass = np.zeros((logNscale_points, logairmass_points, freq_points))
-                    init_arr = False
                 
                 tau_scalar_field[idx,jdx] = data[freq_mask, 1]
                 dTau_airmass[idx,jdx] = data[freq_mask,2] / np.sqrt(np.exp(2*logairmass)-1)
@@ -189,24 +222,50 @@ class Ozone:
                 dTb_airmass[idx,jdx] = data[freq_mask,5] / np.sqrt(np.exp(2*logairmass)-1)
                 dTb_nscale[idx,jdx] = data[freq_mask, 6] * np.exp(logNscale)
 
+                filename = f'MaunaKea_Delay_Spectrum_{logairmass:.3f}_{logNscale:.3f}'
+                directory_path = '/Users/namsonnguyen/repo/data/AM_Data/SON50_delay_spectra_10MHz/'
+                data = np.load(f'{directory_path}{filename}.out') # temporary before dataset is finalzied
+                
+                if init_arr:
+                    L_freq_map = data[:, 0]
+                    if freq_range is not None:
+                        freq_mask = (L_freq_map >= freq_range[0]) & (L_freq_map <= freq_range[1])
+                    L_freq_map = L_freq_map[freq_mask]
+
+                    L_freq_points = len(L_freq_map)
+
+                    L_scalar_field = np.zeros((logNscale_points, logairmass_points, L_freq_points))
+                    dL_nscale = np.zeros((logNscale_points, logairmass_points, L_freq_points))
+                    dL_airmass = np.zeros((logNscale_points, logairmass_points, L_freq_points))
+
+                    init_arr = False
+
+                L_scalar_field[idx,jdx] = data[freq_mask, 1]
+                dL_airmass[idx,jdx] = data[freq_mask, 2] / np.sqrt(np.exp(2*logairmass)-1)
+                dL_nscale[idx,jdx] = data[freq_mask, 3] * np.exp(logNscale)
+
         return {'airmass':{
                 'map':logairmass_map,
                 'dTb':dTb_airmass,
                 'dTau':dTau_airmass,
+                'dL':dL_airmass,
                 'points':logairmass_points
             },
             'Nscale':{
                 'map':logNscale_map,
                 'dTb':dTb_nscale,
                 'dTau':dTau_nscale,
+                'dL':dL_nscale,
                 'points':logNscale_points
             },
             'freq':{
                 'map':freq_map,
+                'L_map':L_freq_map,
                 'points':freq_points
             },
             'Tb_scalar_field':Tb_scalar_field,
-            'tau_scalar_field':tau_scalar_field
+            'tau_scalar_field':tau_scalar_field,
+            'L_scalar_field':L_scalar_field
             }
     
     def _2DCubicHermiteSpline(self, eval_airmass, eval_nscale, init_interp_func, logairmass_interp_func):
@@ -359,8 +418,8 @@ class Ozone:
             axis=1,
         )
 
-        if not any(scalar_field == s for s in ['dTb', 'dTau']):
-            raise TypeError("scalar_field must be either \'dTb\' or \'dTau\'")
+        if not any(scalar_field == s for s in ['dTb', 'dTau', 'dL']):
+            raise TypeError("scalar_field must be either \'dTb\' or \'dTau\' or \'dL\'")
         # Interpolate for nscale Jacobian at the chosen nscale
         mod_jacobian = self._bilinear_jacobian_interp(
             eval_nscale=eval_nscale[0],
@@ -490,6 +549,29 @@ class Ozone:
             return_args.append(tau)
 
         return T_star, Tsky, tau
+
+    def delay_spectrum(
+            self,
+            pwv,
+            zenith,
+            freq_arr=None,):
+        
+        self.lognscale = np.log(pwv / self.nominal_pwv)
+        self.logairmass = np.log(self._zenith_to_airmass(zenith))
+
+        delay_spectrum = self._interp_spectrum(
+            eval_airmass=[self.logairmass],
+            eval_nscale=[self.lognscale],
+            scalar_field='dL',
+            airmass_cubic_interp_dict=self.L_airmass_cubic_interp_dict,
+            nscale_cubic_interp_dict=self.L_nscale_cubic_interp_dict
+        ).flatten()
+        if freq_arr is not None:
+            delay_spectrum = np.interp(
+                freq_arr.flatten(), self.data['freq']['map'], delay_spectrum # type: ignore
+            ).reshape(freq_arr.shape)
+
+        return delay_spectrum
 
     def __call__(
             self,
